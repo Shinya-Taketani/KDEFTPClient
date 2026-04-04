@@ -16,11 +16,10 @@ class SiteManagerDialog : public QDialog
 public:
     explicit SiteManagerDialog(QWidget *parent = nullptr);
 
-    void setSiteProfiles(const std::vector<domain::SiteProfile> &siteProfiles);
+    void setSites(const std::vector<domain::SiteProfile> &sites);
 
 private:
     void setupUi();
-    void populatePlaceholderData();
     void updateTable(const std::vector<domain::SiteProfile> &siteProfiles);
 
     QTableWidget *m_siteTable;

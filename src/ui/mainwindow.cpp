@@ -32,6 +32,26 @@ void MainWindow::setupInitialState()
 
     connect(ui->actionNewSite, &QAction::triggered, this, [this]() {
         SiteManagerDialog dialog(this);
+        std::vector<domain::SiteProfile> sites;
+
+        domain::SiteProfile ftpSite;
+        ftpSite.connectionName = "Example FTP";
+        ftpSite.host = "ftp.example.com";
+        ftpSite.port = 21;
+        ftpSite.userName = "demo";
+        ftpSite.protocol = domain::Protocol::Ftp;
+        sites.push_back(ftpSite);
+
+        domain::SiteProfile sftpSite;
+        sftpSite.connectionName = "Example SFTP";
+        sftpSite.host = "sftp.example.net";
+        sftpSite.port = 22;
+        sftpSite.userName = "deploy";
+        sftpSite.protocol = domain::Protocol::Sftp;
+        sftpSite.useSshTunnel = true;
+        sites.push_back(sftpSite);
+
+        dialog.setSites(sites);
         dialog.exec();
     });
 

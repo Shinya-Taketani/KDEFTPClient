@@ -25,6 +25,7 @@ public:
 
 private:
     void setupUi();
+    void updateEmptyState(bool isEmpty);
     void updateTable(const QList<PlaceholderItem> &items);
 
     QLabel *m_descriptionLabel;

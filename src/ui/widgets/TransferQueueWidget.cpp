@@ -46,6 +46,7 @@ void TransferQueueWidget::setupUi()
 
 void TransferQueueWidget::updateTable(const QList<PlaceholderItem> &items)
 {
+    updateEmptyState(items.isEmpty());
     m_transferTable->setRowCount(items.size());
 
     for (int row = 0; row < items.size(); ++row) {
@@ -58,5 +59,18 @@ void TransferQueueWidget::updateTable(const QList<PlaceholderItem> &items)
 
     if (!items.isEmpty()) {
         m_transferTable->selectRow(0);
+    } else {
+        m_transferTable->clearSelection();
     }
+}
+
+void TransferQueueWidget::updateEmptyState(bool isEmpty)
+{
+    if (isEmpty) {
+        m_descriptionLabel->setText(tr("現在、転送キューに項目はありません。"));
+    } else {
+        m_descriptionLabel->setText(tr("転送キューのダミー表示です。"));
+    }
+
+    m_transferTable->setVisible(!isEmpty);
 }

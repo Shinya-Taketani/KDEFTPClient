@@ -14,12 +14,11 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent)
     , m_siteTable(nullptr)
 {
     setupUi();
-    populatePlaceholderData();
 }
 
-void SiteManagerDialog::setSiteProfiles(const std::vector<domain::SiteProfile> &siteProfiles)
+void SiteManagerDialog::setSites(const std::vector<domain::SiteProfile> &sites)
 {
-    updateTable(siteProfiles);
+    updateTable(sites);
 }
 
 void SiteManagerDialog::setupUi()
@@ -62,30 +61,6 @@ void SiteManagerDialog::setupUi()
     connect(closeButton, &QPushButton::clicked, this, &QDialog::reject);
 
     layout->addWidget(buttonBox);
-}
-
-void SiteManagerDialog::populatePlaceholderData()
-{
-    std::vector<domain::SiteProfile> profiles;
-
-    domain::SiteProfile ftpProfile;
-    ftpProfile.connectionName = "Example FTP";
-    ftpProfile.host = "ftp.example.com";
-    ftpProfile.port = 21;
-    ftpProfile.userName = "demo";
-    ftpProfile.protocol = domain::Protocol::Ftp;
-    profiles.push_back(ftpProfile);
-
-    domain::SiteProfile sftpProfile;
-    sftpProfile.connectionName = "Example SFTP";
-    sftpProfile.host = "sftp.example.net";
-    sftpProfile.port = 22;
-    sftpProfile.userName = "deploy";
-    sftpProfile.protocol = domain::Protocol::Sftp;
-    sftpProfile.useSshTunnel = true;
-    profiles.push_back(sftpProfile);
-
-    updateTable(profiles);
 }
 
 void SiteManagerDialog::updateTable(const std::vector<domain::SiteProfile> &siteProfiles)
