@@ -8,6 +8,7 @@
 #include <vector>
 
 class QLabel;
+class QPushButton;
 class QTableWidget;
 
 class SiteManagerDialog : public QDialog
@@ -21,11 +22,15 @@ public:
 
 private:
     void setupUi();
+    void updateActionButtonState();
     void updateEmptyState(bool isEmpty);
     void updateTable(const std::vector<domain::SiteProfile> &siteProfiles);
 
     QLabel *m_descriptionLabel;
     QTableWidget *m_siteTable;
+    QPushButton *m_editButton;
+    QPushButton *m_removeButton;
+    QPushButton *m_connectButton;
 };
 
 #endif // SITEMANAGERDIALOG_H

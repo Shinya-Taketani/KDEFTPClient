@@ -13,6 +13,9 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent)
     : QDialog(parent)
     , m_descriptionLabel(nullptr)
     , m_siteTable(nullptr)
+    , m_editButton(nullptr)
+    , m_removeButton(nullptr)
+    , m_connectButton(nullptr)
 {
     setupUi();
 }
@@ -49,19 +52,35 @@ void SiteManagerDialog::setupUi()
 
     auto *buttonBox = new QDialogButtonBox(this);
     auto *newButton = buttonBox->addButton(tr("新規"), QDialogButtonBox::ActionRole);
-    auto *editButton = buttonBox->addButton(tr("編集"), QDialogButtonBox::ActionRole);
-    auto *removeButton = buttonBox->addButton(tr("削除"), QDialogButtonBox::ActionRole);
-    auto *connectButton = buttonBox->addButton(tr("接続"), QDialogButtonBox::ActionRole);
+    m_editButton = buttonBox->addButton(tr("編集"), QDialogButtonBox::ActionRole);
+    m_removeButton = buttonBox->addButton(tr("削除"), QDialogButtonBox::ActionRole);
+    m_connectButton = buttonBox->addButton(tr("接続"), QDialogButtonBox::ActionRole);
     auto *closeButton = buttonBox->addButton(tr("閉じる"), QDialogButtonBox::RejectRole);
 
-    newButton->setEnabled(false);
-    editButton->setEnabled(false);
-    removeButton->setEnabled(false);
-    connectButton->setEnabled(false);
+    newButton->setEnabled(true);
+    updateActionButtonState();
 
     connect(closeButton, &QPushButton::clicked, this, &QDialog::reject);
+    connect(m_siteTable, &QTableWidget::itemSelectionChanged, this, &SiteManagerDialog::updateActionButtonState);
 
     layout->addWidget(buttonBox);
+}
+
+void SiteManagerDialog::updateActionButtonState()
+{
+    const bool hasSelection = m_siteTable != nullptr && !m_siteTable->selectedItems().isEmpty();
+
+    if (m_editButton != nullptr) {
+        m_editButton->setEnabled(hasSelection);
+    }
+
+    if (m_removeButton != nullptr) {
+        m_removeButton->setEnabled(hasSelection);
+    }
+
+    if (m_connectButton != nullptr) {
+        m_connectButton->setEnabled(hasSelection);
+    }
 }
 
 void SiteManagerDialog::updateTable(const std::vector<domain::SiteProfile> &siteProfiles)
@@ -92,11 +111,8 @@ void SiteManagerDialog::updateTable(const std::vector<domain::SiteProfile> &site
         m_siteTable->setItem(row, 4, new QTableWidgetItem(protocolLabel));
     }
 
-    if (!siteProfiles.empty()) {
-        m_siteTable->selectRow(0);
-    } else {
-        m_siteTable->clearSelection();
-    }
+    m_siteTable->clearSelection();
+    updateActionButtonState();
 }
 
 void SiteManagerDialog::updateEmptyState(bool isEmpty)
