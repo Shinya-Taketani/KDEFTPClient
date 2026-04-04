@@ -8,9 +8,15 @@
 
 TransferQueueWidget::TransferQueueWidget(QWidget *parent)
     : QWidget(parent)
+    , m_descriptionLabel(nullptr)
     , m_transferTable(nullptr)
 {
     setupUi();
+}
+
+void TransferQueueWidget::setPlaceholderItems(const QList<PlaceholderItem> &items)
+{
+    updateTable(items);
 }
 
 void TransferQueueWidget::setupUi()
@@ -19,10 +25,10 @@ void TransferQueueWidget::setupUi()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
 
-    auto *descriptionLabel = new QLabel(tr("転送キューのダミー表示です。"), this);
-    layout->addWidget(descriptionLabel);
+    m_descriptionLabel = new QLabel(tr("転送キューのダミー表示です。"), this);
+    layout->addWidget(m_descriptionLabel);
 
-    m_transferTable = new QTableWidget(1, 4, this);
+    m_transferTable = new QTableWidget(0, 4, this);
     m_transferTable->setHorizontalHeaderLabels(
         {tr("方向"), tr("送信元"), tr("送信先"), tr("状態")});
     m_transferTable->horizontalHeader()->setStretchLastSection(true);
@@ -31,10 +37,26 @@ void TransferQueueWidget::setupUi()
     m_transferTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_transferTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    m_transferTable->setItem(0, 0, new QTableWidgetItem(tr("アップロード")));
-    m_transferTable->setItem(0, 1, new QTableWidgetItem(QStringLiteral("README.txt")));
-    m_transferTable->setItem(0, 2, new QTableWidgetItem(QStringLiteral("/remote/home/README.txt")));
-    m_transferTable->setItem(0, 3, new QTableWidgetItem(tr("待機中")));
-
     layout->addWidget(m_transferTable);
+
+    setPlaceholderItems({
+        {tr("アップロード"), QStringLiteral("README.txt"), QStringLiteral("/remote/home/README.txt"), tr("待機中")},
+    });
+}
+
+void TransferQueueWidget::updateTable(const QList<PlaceholderItem> &items)
+{
+    m_transferTable->setRowCount(items.size());
+
+    for (int row = 0; row < items.size(); ++row) {
+        const auto &item = items.at(row);
+        m_transferTable->setItem(row, 0, new QTableWidgetItem(item.direction));
+        m_transferTable->setItem(row, 1, new QTableWidgetItem(item.source));
+        m_transferTable->setItem(row, 2, new QTableWidgetItem(item.destination));
+        m_transferTable->setItem(row, 3, new QTableWidgetItem(item.status));
+    }
+
+    if (!items.isEmpty()) {
+        m_transferTable->selectRow(0);
+    }
 }
