@@ -7,6 +7,7 @@
 
 #include <vector>
 
+class QLabel;
 class QTableWidget;
 
 class SiteManagerDialog : public QDialog
@@ -20,8 +21,10 @@ public:
 
 private:
     void setupUi();
+    void updateEmptyState(bool isEmpty);
     void updateTable(const std::vector<domain::SiteProfile> &siteProfiles);
 
+    QLabel *m_descriptionLabel;
     QTableWidget *m_siteTable;
 };
 

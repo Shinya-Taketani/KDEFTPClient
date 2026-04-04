@@ -11,6 +11,7 @@
 
 SiteManagerDialog::SiteManagerDialog(QWidget *parent)
     : QDialog(parent)
+    , m_descriptionLabel(nullptr)
     , m_siteTable(nullptr)
 {
     setupUi();
@@ -30,9 +31,9 @@ void SiteManagerDialog::setupUi()
     layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(8);
 
-    auto *descriptionLabel = new QLabel(
+    m_descriptionLabel = new QLabel(
         tr("保存済み接続先の一覧を表示するためのダミー画面です。"), this);
-    layout->addWidget(descriptionLabel);
+    layout->addWidget(m_descriptionLabel);
 
     m_siteTable = new QTableWidget(this);
     m_siteTable->setColumnCount(5);
@@ -65,6 +66,7 @@ void SiteManagerDialog::setupUi()
 
 void SiteManagerDialog::updateTable(const std::vector<domain::SiteProfile> &siteProfiles)
 {
+    updateEmptyState(siteProfiles.empty());
     m_siteTable->setRowCount(static_cast<int>(siteProfiles.size()));
 
     for (int row = 0; row < static_cast<int>(siteProfiles.size()); ++row) {
@@ -92,5 +94,19 @@ void SiteManagerDialog::updateTable(const std::vector<domain::SiteProfile> &site
 
     if (!siteProfiles.empty()) {
         m_siteTable->selectRow(0);
+    } else {
+        m_siteTable->clearSelection();
     }
+}
+
+void SiteManagerDialog::updateEmptyState(bool isEmpty)
+{
+    if (isEmpty) {
+        m_descriptionLabel->setText(
+            tr("接続先はまだ登録されていません。まずは「新規」から接続先を追加してください。"));
+    } else {
+        m_descriptionLabel->setText(tr("保存済み接続先の一覧を表示します。"));
+    }
+
+    m_siteTable->setVisible(!isEmpty);
 }
