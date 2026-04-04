@@ -4,7 +4,9 @@
 #include "domain/SiteProfile.h"
 
 #include <QDialog>
+#include <QString>
 
+#include <optional>
 #include <vector>
 
 class QLabel;
@@ -19,6 +21,7 @@ public:
     explicit SiteManagerDialog(QWidget *parent = nullptr);
 
     void setSites(const std::vector<domain::SiteProfile> &sites);
+    [[nodiscard]] std::optional<QString> selectedSiteName() const;
 
 private:
     void setupUi();

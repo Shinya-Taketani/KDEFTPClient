@@ -25,6 +25,25 @@ void SiteManagerDialog::setSites(const std::vector<domain::SiteProfile> &sites)
     updateTable(sites);
 }
 
+std::optional<QString> SiteManagerDialog::selectedSiteName() const
+{
+    if (m_siteTable == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto selectedItems = m_siteTable->selectedItems();
+    if (selectedItems.isEmpty()) {
+        return std::nullopt;
+    }
+
+    auto *nameItem = m_siteTable->item(selectedItems.first()->row(), 0);
+    if (nameItem == nullptr) {
+        return std::nullopt;
+    }
+
+    return nameItem->text();
+}
+
 void SiteManagerDialog::setupUi()
 {
     setWindowTitle(tr("接続先管理"));
