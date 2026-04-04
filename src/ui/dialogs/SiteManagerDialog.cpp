@@ -9,6 +9,12 @@
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+namespace {
+
+constexpr int kConnectionNameColumn = 0;
+
+}
+
 SiteManagerDialog::SiteManagerDialog(QWidget *parent)
     : QDialog(parent)
     , m_descriptionLabel(nullptr)
@@ -25,7 +31,7 @@ void SiteManagerDialog::setSites(const std::vector<domain::SiteProfile> &sites)
     updateTable(sites);
 }
 
-std::optional<QString> SiteManagerDialog::selectedSiteName() const
+std::optional<int> SiteManagerDialog::selectedRow() const
 {
     if (m_siteTable == nullptr) {
         return std::nullopt;
@@ -36,7 +42,17 @@ std::optional<QString> SiteManagerDialog::selectedSiteName() const
         return std::nullopt;
     }
 
-    auto *nameItem = m_siteTable->item(selectedItems.first()->row(), 0);
+    return selectedItems.first()->row();
+}
+
+std::optional<QString> SiteManagerDialog::selectedSiteName() const
+{
+    const auto row = selectedRow();
+    if (!row.has_value() || m_siteTable == nullptr) {
+        return std::nullopt;
+    }
+
+    auto *nameItem = m_siteTable->item(*row, kConnectionNameColumn);
     if (nameItem == nullptr) {
         return std::nullopt;
     }
@@ -123,7 +139,7 @@ void SiteManagerDialog::updateTable(const std::vector<domain::SiteProfile> &site
             break;
         }
 
-        m_siteTable->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(siteProfile.connectionName)));
+        m_siteTable->setItem(row, kConnectionNameColumn, new QTableWidgetItem(QString::fromStdString(siteProfile.connectionName)));
         m_siteTable->setItem(row, 1, new QTableWidgetItem(QString::fromStdString(siteProfile.host)));
         m_siteTable->setItem(row, 2, new QTableWidgetItem(QString::number(siteProfile.port)));
         m_siteTable->setItem(row, 3, new QTableWidgetItem(QString::fromStdString(siteProfile.userName)));

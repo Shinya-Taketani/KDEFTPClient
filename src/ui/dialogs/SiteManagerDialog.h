@@ -21,6 +21,7 @@ public:
     explicit SiteManagerDialog(QWidget *parent = nullptr);
 
     void setSites(const std::vector<domain::SiteProfile> &sites);
+    [[nodiscard]] std::optional<int> selectedRow() const;
     [[nodiscard]] std::optional<QString> selectedSiteName() const;
 
 private:
