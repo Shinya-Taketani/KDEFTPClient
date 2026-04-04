@@ -9,6 +9,8 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
+class TransferQueueWidget;
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -21,5 +23,6 @@ private:
     void setupInitialState();
 
     Ui::MainWindow *ui;
+    TransferQueueWidget *m_transferQueueWidget;
 };
 #endif // MAINWINDOW_H
