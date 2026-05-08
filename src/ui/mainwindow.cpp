@@ -18,6 +18,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstdint>
 
 namespace {
 
@@ -58,10 +59,44 @@ QString protocolLabel(domain::Protocol protocol)
     return QStringLiteral("Unknown");
 }
 
-QString remoteFileName(const QString &remotePath)
+int progressPercent(const domain::TransferProgress &progress)
 {
-    const auto parts = remotePath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    return parts.isEmpty() ? remotePath : parts.last();
+    if (progress.totalBytes == 0) {
+        return 0;
+    }
+
+    const auto percent = (progress.transferredBytes * 100) / progress.totalBytes;
+    return static_cast<int>(std::min<std::uint64_t>(percent, 100));
+}
+
+QString stateLabel(domain::TransferState state, bool connected)
+{
+    switch (state) {
+    case domain::TransferState::Pending:
+        return connected ? QObject::tr("待機中") : QObject::tr("未接続で保留");
+    case domain::TransferState::Running:
+        return QObject::tr("転送中");
+    case domain::TransferState::Completed:
+        return QObject::tr("完了");
+    case domain::TransferState::Failed:
+        return QObject::tr("失敗");
+    case domain::TransferState::Cancelled:
+        return QObject::tr("キャンセル済み");
+    }
+
+    return QObject::tr("不明");
+}
+
+TransferQueueWidget::QueueItem queueItemFromJob(const domain::TransferJob &job, bool connected)
+{
+    const bool isUpload = job.request.direction == domain::TransferDirection::Upload;
+    return {
+        isUpload ? QObject::tr("アップロード") : QObject::tr("ダウンロード"),
+        QString::fromStdString(isUpload ? job.request.localPath : job.request.remotePath),
+        QString::fromStdString(isUpload ? job.request.remotePath : job.request.localPath),
+        stateLabel(job.progress.state, connected),
+        progressPercent(job.progress),
+    };
 }
 
 }
@@ -72,7 +107,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_transferQueueWidget(nullptr)
     , m_localPath(QDir::homePath())
     , m_remotePath(QStringLiteral("/"))
-    , m_sites(sampleSites())
+    , m_siteProfileRepository(sampleSites())
+    , m_siteProfileService(m_siteProfileRepository)
+    , m_currentProtocol(domain::Protocol::Ftp)
     , m_connected(false)
 {
     ui->setupUi(this);
@@ -137,6 +174,7 @@ void MainWindow::setupActions()
     connect(ui->actionDisconnect, &QAction::triggered, this, [this]() {
         m_connected = false;
         loadRemotePlaceholder(QStringLiteral("/"));
+        renderTransferQueue();
         appendLogMessage(tr("Disconnected"));
         ui->statusbar->showMessage(tr("切断しました"));
     });
@@ -144,7 +182,8 @@ void MainWindow::setupActions()
     connect(ui->actionUpload, &QAction::triggered, this, &MainWindow::enqueueUpload);
     connect(ui->actionDownload, &QAction::triggered, this, &MainWindow::enqueueDownload);
     connect(ui->actionStop, &QAction::triggered, this, [this]() {
-        m_transferQueueWidget->clearItems();
+        m_transferQueueService.clear();
+        renderTransferQueue();
         appendLogMessage(tr("Transfer queue cleared"));
         ui->statusbar->showMessage(tr("転送キューをクリアしました"));
     });
@@ -260,15 +299,33 @@ void MainWindow::loadRemotePlaceholder(const QString &path)
 
 void MainWindow::openSiteManager()
 {
+    const auto result = m_siteProfileService.listProfiles();
+    if (!result.operation.succeeded) {
+        QMessageBox::warning(
+            this,
+            tr("接続先管理"),
+            tr("接続先一覧を読み込めませんでした。"));
+        return;
+    }
+
     SiteManagerDialog dialog(this);
-    dialog.setSites(m_sites);
+    dialog.setSites(result.siteProfiles);
     dialog.exec();
 }
 
 void MainWindow::connectToSelectedSite()
 {
+    const auto profilesResult = m_siteProfileService.listProfiles();
+    if (!profilesResult.operation.succeeded) {
+        QMessageBox::warning(
+            this,
+            tr("接続"),
+            tr("接続先一覧を読み込めませんでした。"));
+        return;
+    }
+
     SiteManagerDialog dialog(this);
-    dialog.setSites(m_sites);
+    dialog.setSites(profilesResult.siteProfiles);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
@@ -278,24 +335,27 @@ void MainWindow::connectToSelectedSite()
         return;
     }
 
-    const auto selectedName = siteName->toStdString();
-    auto selectedSite = std::find_if(m_sites.begin(), m_sites.end(), [&selectedName](const domain::SiteProfile &site) {
-        return site.connectionName == selectedName;
-    });
-    if (selectedSite == m_sites.end()) {
+    const auto selectedSite = m_siteProfileService.findProfileByName(siteName->toStdString());
+    if (!selectedSite.operation.succeeded || !selectedSite.found) {
+        QMessageBox::warning(
+            this,
+            tr("接続"),
+            tr("選択した接続先が見つかりませんでした。"));
         return;
     }
 
     m_connected = true;
-    m_remotePath = QStringLiteral("/home/%1").arg(QString::fromStdString(selectedSite->userName));
+    m_currentProtocol = selectedSite.siteProfile.protocol;
+    m_remotePath = QStringLiteral("/home/%1").arg(QString::fromStdString(selectedSite.siteProfile.userName));
     ui->remotePaneTitleLabel->setText(
         tr("リモート - %1 (%2)")
-            .arg(QString::fromStdString(selectedSite->connectionName), protocolLabel(selectedSite->protocol)));
+            .arg(QString::fromStdString(selectedSite.siteProfile.connectionName), protocolLabel(selectedSite.siteProfile.protocol)));
     loadRemotePlaceholder(m_remotePath);
     appendLogMessage(
         tr("Connected to %1 via %2")
-            .arg(QString::fromStdString(selectedSite->host), protocolLabel(selectedSite->protocol)));
-    ui->statusbar->showMessage(tr("接続しました: %1").arg(QString::fromStdString(selectedSite->connectionName)));
+            .arg(QString::fromStdString(selectedSite.siteProfile.host), protocolLabel(selectedSite.siteProfile.protocol)));
+    renderTransferQueue();
+    ui->statusbar->showMessage(tr("接続しました: %1").arg(QString::fromStdString(selectedSite.siteProfile.connectionName)));
 }
 
 void MainWindow::enqueueUpload()
@@ -307,15 +367,16 @@ void MainWindow::enqueueUpload()
     }
 
     const QFileInfo sourceInfo(source);
-    const QString destination = QDir::cleanPath(m_remotePath + QLatin1Char('/') + sourceInfo.fileName());
-    m_transferQueueWidget->appendItem({
-        tr("アップロード"),
-        source,
-        destination,
-        m_connected ? tr("待機中") : tr("未接続"),
-        0,
-    });
-    appendLogMessage(tr("Queued upload: %1 -> %2").arg(source, destination));
+    const auto job = m_transferQueueService.enqueueUpload(
+        source.toStdString(),
+        m_remotePath.toStdString(),
+        sourceInfo.isFile() ? static_cast<std::uint64_t>(sourceInfo.size()) : 0,
+        m_currentProtocol);
+    renderTransferQueue();
+    appendLogMessage(
+        tr("Queued upload #%1: %2 -> %3")
+            .arg(job.id)
+            .arg(QString::fromStdString(job.request.localPath), QString::fromStdString(job.request.remotePath)));
     ui->bottomTabWidget->setCurrentWidget(ui->transferQueueTab);
     ui->statusbar->showMessage(tr("アップロードをキューに追加しました"));
 }
@@ -328,17 +389,28 @@ void MainWindow::enqueueDownload()
         return;
     }
 
-    const QString destination = QDir::cleanPath(m_localPath + QLatin1Char('/') + remoteFileName(source));
-    m_transferQueueWidget->appendItem({
-        tr("ダウンロード"),
-        source,
-        destination,
-        m_connected ? tr("待機中") : tr("未接続"),
+    const auto job = m_transferQueueService.enqueueDownload(
+        source.toStdString(),
+        m_localPath.toStdString(),
         0,
-    });
-    appendLogMessage(tr("Queued download: %1 -> %2").arg(source, destination));
+        m_currentProtocol);
+    renderTransferQueue();
+    appendLogMessage(
+        tr("Queued download #%1: %2 -> %3")
+            .arg(job.id)
+            .arg(QString::fromStdString(job.request.remotePath), QString::fromStdString(job.request.localPath)));
     ui->bottomTabWidget->setCurrentWidget(ui->transferQueueTab);
     ui->statusbar->showMessage(tr("ダウンロードをキューに追加しました"));
+}
+
+void MainWindow::renderTransferQueue()
+{
+    QList<TransferQueueWidget::QueueItem> items;
+    for (const auto &job : m_transferQueueService.jobs()) {
+        items.append(queueItemFromJob(job, m_connected));
+    }
+
+    m_transferQueueWidget->setItems(items);
 }
 
 void MainWindow::appendLogMessage(const QString &message)

@@ -14,6 +14,12 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 qt_add_executable(kdeftpclient
     src/main.cpp
+    src/app/SiteProfileService.h
+    src/app/SiteProfileService.cpp
+    src/app/TransferQueueService.h
+    src/app/TransferQueueService.cpp
+    src/infra/settings/InMemorySiteProfileRepository.h
+    src/infra/settings/InMemorySiteProfileRepository.cpp
     src/ui/mainwindow.h
     src/ui/mainwindow.cpp
     src/ui/mainwindow.ui

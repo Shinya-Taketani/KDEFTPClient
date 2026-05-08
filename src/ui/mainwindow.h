@@ -6,7 +6,10 @@
 
 #include <vector>
 
+#include "app/SiteProfileService.h"
+#include "app/TransferQueueService.h"
 #include "domain/SiteProfile.h"
+#include "infra/settings/InMemorySiteProfileRepository.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -33,6 +36,7 @@ private:
     void connectToSelectedSite();
     void enqueueUpload();
     void enqueueDownload();
+    void renderTransferQueue();
     void appendLogMessage(const QString &message);
     [[nodiscard]] QString selectedLocalPath() const;
     [[nodiscard]] QString selectedRemotePath() const;
@@ -42,7 +46,10 @@ private:
     TransferQueueWidget *m_transferQueueWidget;
     QString m_localPath;
     QString m_remotePath;
-    std::vector<domain::SiteProfile> m_sites;
+    infra::settings::InMemorySiteProfileRepository m_siteProfileRepository;
+    app::SiteProfileService m_siteProfileService;
+    app::TransferQueueService m_transferQueueService;
+    domain::Protocol m_currentProtocol;
     bool m_connected;
 };
 #endif // MAINWINDOW_H
