@@ -20,6 +20,8 @@ qt_add_executable(kdeftpclient
     src/app/TransferQueueService.cpp
     src/infra/settings/InMemorySiteProfileRepository.h
     src/infra/settings/InMemorySiteProfileRepository.cpp
+    src/infra/settings/JsonSiteProfileRepository.h
+    src/infra/settings/JsonSiteProfileRepository.cpp
     src/ui/mainwindow.h
     src/ui/mainwindow.cpp
     src/ui/mainwindow.ui

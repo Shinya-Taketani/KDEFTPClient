@@ -10,7 +10,7 @@
 #include "app/SiteProfileService.h"
 #include "app/TransferQueueService.h"
 #include "domain/SiteProfile.h"
-#include "infra/settings/InMemorySiteProfileRepository.h"
+#include "infra/settings/JsonSiteProfileRepository.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -49,7 +49,7 @@ private:
     TransferQueueWidget *m_transferQueueWidget;
     QString m_localPath;
     QString m_remotePath;
-    infra::settings::InMemorySiteProfileRepository m_siteProfileRepository;
+    infra::settings::JsonSiteProfileRepository m_siteProfileRepository;
     app::SiteProfileService m_siteProfileService;
     app::TransferQueueService m_transferQueueService;
     domain::Protocol m_currentProtocol;
