@@ -13,6 +13,22 @@ namespace {
 
 constexpr int kConnectionNameColumn = 0;
 
+QString authenticationLabel(const domain::SiteProfile &siteProfile)
+{
+    if (siteProfile.protocol != domain::Protocol::Sftp) {
+        return QStringLiteral("-");
+    }
+
+    switch (siteProfile.authenticationMethod) {
+    case domain::AuthenticationMethod::Password:
+        return QObject::tr("パスワード");
+    case domain::AuthenticationMethod::PrivateKey:
+        return QObject::tr("キーファイル");
+    }
+
+    return QStringLiteral("-");
+}
+
 }
 
 SiteManagerDialog::SiteManagerDialog(QWidget *parent)
@@ -74,9 +90,9 @@ void SiteManagerDialog::setupUi()
     layout->addWidget(m_descriptionLabel);
 
     m_siteTable = new QTableWidget(this);
-    m_siteTable->setColumnCount(5);
+    m_siteTable->setColumnCount(6);
     m_siteTable->setHorizontalHeaderLabels(
-        {tr("接続名"), tr("ホスト"), tr("ポート"), tr("ユーザー"), tr("プロトコル")});
+        {tr("接続名"), tr("ホスト"), tr("ポート"), tr("ユーザー"), tr("プロトコル"), tr("認証")});
     m_siteTable->horizontalHeader()->setStretchLastSection(true);
     m_siteTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_siteTable->verticalHeader()->setVisible(false);
@@ -95,6 +111,19 @@ void SiteManagerDialog::setupUi()
     newButton->setEnabled(true);
     updateActionButtonState();
 
+    connect(newButton, &QPushButton::clicked, this, &SiteManagerDialog::createSiteRequested);
+    connect(m_editButton, &QPushButton::clicked, this, [this]() {
+        const auto siteName = selectedSiteName();
+        if (siteName.has_value()) {
+            emit editSiteRequested(*siteName);
+        }
+    });
+    connect(m_removeButton, &QPushButton::clicked, this, [this]() {
+        const auto siteName = selectedSiteName();
+        if (siteName.has_value()) {
+            emit removeSiteRequested(*siteName);
+        }
+    });
     connect(closeButton, &QPushButton::clicked, this, &QDialog::reject);
     connect(m_connectButton, &QPushButton::clicked, this, &QDialog::accept);
     connect(m_siteTable, &QTableWidget::itemSelectionChanged, this, &SiteManagerDialog::updateActionButtonState);
@@ -150,6 +179,7 @@ void SiteManagerDialog::updateTable(const std::vector<domain::SiteProfile> &site
         m_siteTable->setItem(row, 2, new QTableWidgetItem(QString::number(siteProfile.port)));
         m_siteTable->setItem(row, 3, new QTableWidgetItem(QString::fromStdString(siteProfile.userName)));
         m_siteTable->setItem(row, 4, new QTableWidgetItem(protocolLabel));
+        m_siteTable->setItem(row, 5, new QTableWidgetItem(authenticationLabel(siteProfile)));
     }
 
     m_siteTable->clearSelection();

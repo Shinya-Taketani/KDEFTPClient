@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QString>
 
+#include <optional>
 #include <vector>
 
 #include "app/SiteProfileService.h"
@@ -37,6 +38,8 @@ private:
     void enqueueUpload();
     void enqueueDownload();
     void renderTransferQueue();
+    bool editSiteProfile(const std::optional<QString> &connectionName);
+    void refreshSiteManagerDialog(class SiteManagerDialog &dialog);
     void appendLogMessage(const QString &message);
     [[nodiscard]] QString selectedLocalPath() const;
     [[nodiscard]] QString selectedRemotePath() const;

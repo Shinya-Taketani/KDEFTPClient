@@ -25,6 +25,8 @@ qt_add_executable(kdeftpclient
     src/ui/mainwindow.ui
     src/ui/dialogs/SiteManagerDialog.h
     src/ui/dialogs/SiteManagerDialog.cpp
+    src/ui/dialogs/SiteProfileDialog.h
+    src/ui/dialogs/SiteProfileDialog.cpp
     src/ui/widgets/TransferQueueWidget.h
     src/ui/widgets/TransferQueueWidget.cpp
 )

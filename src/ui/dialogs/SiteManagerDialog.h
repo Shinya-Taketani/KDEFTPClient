@@ -24,6 +24,11 @@ public:
     [[nodiscard]] std::optional<int> selectedRow() const;
     [[nodiscard]] std::optional<QString> selectedSiteName() const;
 
+signals:
+    void createSiteRequested();
+    void editSiteRequested(const QString &connectionName);
+    void removeSiteRequested(const QString &connectionName);
+
 private:
     void setupUi();
     void updateActionButtonState();

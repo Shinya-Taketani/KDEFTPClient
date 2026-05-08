@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui/dialogs/SiteManagerDialog.h"
+#include "ui/dialogs/SiteProfileDialog.h"
 #include "ui/widgets/TransferQueueWidget.h"
 #include "ui_mainwindow.h"
 
@@ -11,6 +12,7 @@
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QStyle>
 #include <QTime>
 #include <QTreeWidget>
@@ -57,6 +59,34 @@ QString protocolLabel(domain::Protocol protocol)
     }
 
     return QStringLiteral("Unknown");
+}
+
+QString authenticationLabel(const domain::SiteProfile &siteProfile)
+{
+    if (siteProfile.protocol != domain::Protocol::Sftp) {
+        return QObject::tr("standard authentication");
+    }
+
+    switch (siteProfile.authenticationMethod) {
+    case domain::AuthenticationMethod::Password:
+        return QObject::tr("password authentication");
+    case domain::AuthenticationMethod::PrivateKey:
+        return QObject::tr("key file authentication");
+    }
+
+    return QObject::tr("unknown authentication");
+}
+
+QString expandUserPath(const QString &path)
+{
+    if (path == QStringLiteral("~")) {
+        return QDir::homePath();
+    }
+    if (path.startsWith(QStringLiteral("~/"))) {
+        return QDir::homePath() + path.mid(1);
+    }
+
+    return path;
 }
 
 int progressPercent(const domain::TransferProgress &progress)
@@ -299,17 +329,38 @@ void MainWindow::loadRemotePlaceholder(const QString &path)
 
 void MainWindow::openSiteManager()
 {
-    const auto result = m_siteProfileService.listProfiles();
-    if (!result.operation.succeeded) {
-        QMessageBox::warning(
-            this,
-            tr("接続先管理"),
-            tr("接続先一覧を読み込めませんでした。"));
-        return;
-    }
-
     SiteManagerDialog dialog(this);
-    dialog.setSites(result.siteProfiles);
+    refreshSiteManagerDialog(dialog);
+
+    connect(&dialog, &SiteManagerDialog::createSiteRequested, this, [&dialog, this]() {
+        if (editSiteProfile(std::nullopt)) {
+            refreshSiteManagerDialog(dialog);
+        }
+    });
+    connect(&dialog, &SiteManagerDialog::editSiteRequested, this, [&dialog, this](const QString &connectionName) {
+        if (editSiteProfile(connectionName)) {
+            refreshSiteManagerDialog(dialog);
+        }
+    });
+    connect(&dialog, &SiteManagerDialog::removeSiteRequested, this, [&dialog, this](const QString &connectionName) {
+        const auto reply = QMessageBox::question(
+            this,
+            tr("接続先の削除"),
+            tr("接続先「%1」を削除しますか？").arg(connectionName));
+        if (reply != QMessageBox::Yes) {
+            return;
+        }
+
+        const auto result = m_siteProfileService.removeProfile(connectionName.toStdString());
+        if (!result.succeeded) {
+            QMessageBox::warning(this, tr("接続先の削除"), tr("接続先を削除できませんでした。"));
+            return;
+        }
+
+        appendLogMessage(tr("Site profile removed: %1").arg(connectionName));
+        refreshSiteManagerDialog(dialog);
+    });
+
     dialog.exec();
 }
 
@@ -344,6 +395,18 @@ void MainWindow::connectToSelectedSite()
         return;
     }
 
+    if (selectedSite.siteProfile.authenticationMethod == domain::AuthenticationMethod::PrivateKey) {
+        const auto keyPath = expandUserPath(QString::fromStdString(selectedSite.siteProfile.privateKeyPath).trimmed());
+        if (keyPath.trimmed().isEmpty()) {
+            QMessageBox::warning(this, tr("接続"), tr("キーファイルが指定されていません。"));
+            return;
+        }
+        if (!QFileInfo::exists(keyPath)) {
+            QMessageBox::warning(this, tr("接続"), tr("キーファイルが見つかりません: %1").arg(keyPath));
+            return;
+        }
+    }
+
     m_connected = true;
     m_currentProtocol = selectedSite.siteProfile.protocol;
     m_remotePath = QStringLiteral("/home/%1").arg(QString::fromStdString(selectedSite.siteProfile.userName));
@@ -352,8 +415,11 @@ void MainWindow::connectToSelectedSite()
             .arg(QString::fromStdString(selectedSite.siteProfile.connectionName), protocolLabel(selectedSite.siteProfile.protocol)));
     loadRemotePlaceholder(m_remotePath);
     appendLogMessage(
-        tr("Connected to %1 via %2")
-            .arg(QString::fromStdString(selectedSite.siteProfile.host), protocolLabel(selectedSite.siteProfile.protocol)));
+        tr("Connected to %1 via %2 using %3")
+            .arg(
+                QString::fromStdString(selectedSite.siteProfile.host),
+                protocolLabel(selectedSite.siteProfile.protocol),
+                authenticationLabel(selectedSite.siteProfile)));
     renderTransferQueue();
     ui->statusbar->showMessage(tr("接続しました: %1").arg(QString::fromStdString(selectedSite.siteProfile.connectionName)));
 }
@@ -413,6 +479,56 @@ void MainWindow::renderTransferQueue()
     m_transferQueueWidget->setItems(items);
 }
 
+bool MainWindow::editSiteProfile(const std::optional<QString> &connectionName)
+{
+    SiteProfileDialog dialog(this);
+    dialog.setWindowTitle(connectionName.has_value() ? tr("接続先の編集") : tr("新規接続先"));
+
+    if (connectionName.has_value()) {
+        const auto existingProfile = m_siteProfileService.findProfileByName(connectionName->toStdString());
+        if (!existingProfile.operation.succeeded || !existingProfile.found) {
+            QMessageBox::warning(this, tr("接続先"), tr("選択した接続先が見つかりませんでした。"));
+            return false;
+        }
+
+        dialog.setSiteProfile(existingProfile.siteProfile);
+    }
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    const auto profile = dialog.siteProfile();
+    const auto saveResult = m_siteProfileService.saveProfile(profile);
+    if (!saveResult.succeeded) {
+        QMessageBox::warning(this, tr("接続先"), tr("接続先を保存できませんでした。"));
+        return false;
+    }
+    if (connectionName.has_value() && *connectionName != QString::fromStdString(profile.connectionName)) {
+        const auto removeOldResult = m_siteProfileService.removeProfile(connectionName->toStdString());
+        if (!removeOldResult.succeeded) {
+            appendLogMessage(tr("Old site profile name was not removed: %1").arg(*connectionName));
+        }
+    }
+
+    appendLogMessage(tr("Site profile saved: %1").arg(QString::fromStdString(profile.connectionName)));
+    return true;
+}
+
+void MainWindow::refreshSiteManagerDialog(SiteManagerDialog &dialog)
+{
+    const auto result = m_siteProfileService.listProfiles();
+    if (!result.operation.succeeded) {
+        QMessageBox::warning(
+            this,
+            tr("接続先管理"),
+            tr("接続先一覧を読み込めませんでした。"));
+        return;
+    }
+
+    dialog.setSites(result.siteProfiles);
+}
+
 void MainWindow::appendLogMessage(const QString &message)
 {
     ui->logPlainTextEdit->appendPlainText(
@@ -458,6 +574,16 @@ std::vector<domain::SiteProfile> MainWindow::sampleSites() const
     ftpsSite.userName = "deploy";
     ftpsSite.protocol = domain::Protocol::Ftps;
     sites.push_back(ftpsSite);
+
+    domain::SiteProfile sftpKeySite;
+    sftpKeySite.connectionName = "Example SFTP Key";
+    sftpKeySite.host = "sftp.example.net";
+    sftpKeySite.port = 22;
+    sftpKeySite.userName = "deploy";
+    sftpKeySite.protocol = domain::Protocol::Sftp;
+    sftpKeySite.authenticationMethod = domain::AuthenticationMethod::PrivateKey;
+    sftpKeySite.privateKeyPath = (QDir::homePath() + QStringLiteral("/.ssh/id_ed25519")).toStdString();
+    sites.push_back(sftpKeySite);
 
     return sites;
 }

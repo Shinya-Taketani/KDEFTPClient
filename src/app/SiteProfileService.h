@@ -10,6 +10,8 @@ class SiteProfileService
 public:
     explicit SiteProfileService(infra::settings::ISiteProfileRepository &repository);
 
+    [[nodiscard]] infra::settings::SiteProfileRepositoryResult saveProfile(const domain::SiteProfile &siteProfile);
+    [[nodiscard]] infra::settings::SiteProfileRepositoryResult removeProfile(const std::string &connectionName);
     [[nodiscard]] infra::settings::ListSiteProfilesResult listProfiles();
     [[nodiscard]] infra::settings::FindSiteProfileResult findProfileByName(const std::string &connectionName);
 

@@ -8,12 +8,19 @@
 
 namespace domain {
 
+enum class AuthenticationMethod : std::uint8_t {
+    Password,
+    PrivateKey,
+};
+
 struct SiteProfile {
     std::string connectionName;
     std::string host;
     std::uint16_t port { defaultPortForProtocol(Protocol::Ftp) };
     std::string userName;
     Protocol protocol { Protocol::Ftp };
+    AuthenticationMethod authenticationMethod { AuthenticationMethod::Password };
+    std::string privateKeyPath;
     bool passiveMode { true };
     bool allowAnonymousLogin { false };
     bool useSshTunnel { false };
