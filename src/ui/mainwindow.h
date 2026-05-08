@@ -5,6 +5,7 @@
 #include <QString>
 
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include "app/CredentialService.h"
@@ -23,6 +24,7 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
+class QTimer;
 class TransferQueueWidget;
 
 class MainWindow : public QMainWindow
@@ -48,6 +50,7 @@ private:
     void enqueueUpload();
     void enqueueDownload();
     void startQueuedTransfer(domain::TransferJobId jobId);
+    void pollTransferProgress();
     void renderTransferQueue();
     bool editSiteProfile(const std::optional<QString> &connectionName);
     void refreshSiteManagerDialog(class SiteManagerDialog &dialog);
@@ -58,6 +61,7 @@ private:
 
     Ui::MainWindow *ui;
     TransferQueueWidget *m_transferQueueWidget;
+    QTimer *m_transferProgressTimer;
     QString m_localPath;
     QString m_remotePath;
     infra::settings::JsonSiteProfileRepository m_siteProfileRepository;
@@ -67,6 +71,7 @@ private:
     infra::transfer::CurlTransferEngine m_transferEngine;
     app::RemoteSessionService m_remoteSessionService;
     app::TransferQueueService m_transferQueueService;
+    std::unordered_map<domain::TransferJobId, domain::TransferJobId> m_backendJobIds;
     domain::Protocol m_currentProtocol;
     bool m_connected;
 };

@@ -15,6 +15,7 @@ public:
     ListDirectoryResult listDirectory(const std::string &remotePath) override;
     StartTransferResult upload(const TransferRequest &request) override;
     StartTransferResult download(const TransferRequest &request) override;
+    TransferProgressResult progress(TransferJobId jobId) override;
     OperationResult cancel(TransferJobId jobId) override;
 
 private:

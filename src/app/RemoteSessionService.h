@@ -16,6 +16,7 @@ public:
     [[nodiscard]] infra::transfer::ListDirectoryResult listDirectory(const std::string &remotePath);
     [[nodiscard]] infra::transfer::StartTransferResult upload(const domain::TransferRequest &request);
     [[nodiscard]] infra::transfer::StartTransferResult download(const domain::TransferRequest &request);
+    [[nodiscard]] infra::transfer::TransferProgressResult progress(domain::TransferJobId jobId);
     [[nodiscard]] infra::transfer::OperationResult cancel(domain::TransferJobId jobId);
 
 private:

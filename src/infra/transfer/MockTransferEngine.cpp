@@ -177,6 +177,20 @@ StartTransferResult MockTransferEngine::download(const TransferRequest &request)
     };
 }
 
+TransferProgressResult MockTransferEngine::progress(TransferJobId jobId)
+{
+    return {
+        .operation = succeeded(),
+        .progress = {
+            .jobId = jobId,
+            .state = domain::TransferState::Completed,
+            .transferredBytes = 1,
+            .totalBytes = 1,
+        },
+        .found = true,
+    };
+}
+
 OperationResult MockTransferEngine::cancel(TransferJobId jobId)
 {
     (void)jobId;

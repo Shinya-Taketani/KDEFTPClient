@@ -47,6 +47,12 @@ struct StartTransferResult {
     TransferJobId jobId { 0 };
 };
 
+struct TransferProgressResult {
+    OperationResult operation;
+    TransferProgress progress;
+    bool found { false };
+};
+
 struct ConnectionResult {
     OperationResult operation;
     domain::SiteProfile siteProfile;

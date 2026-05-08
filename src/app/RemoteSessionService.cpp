@@ -32,6 +32,11 @@ infra::transfer::StartTransferResult RemoteSessionService::download(const domain
     return m_transferEngine.download(request);
 }
 
+infra::transfer::TransferProgressResult RemoteSessionService::progress(domain::TransferJobId jobId)
+{
+    return m_transferEngine.progress(jobId);
+}
+
 infra::transfer::OperationResult RemoteSessionService::cancel(domain::TransferJobId jobId)
 {
     return m_transferEngine.cancel(jobId);

@@ -14,6 +14,7 @@
 #include <QMessageBox>
 #include <QStyle>
 #include <QTime>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
@@ -78,6 +79,9 @@ QString authenticationLabel(const domain::SiteProfile &siteProfile)
 
 int progressPercent(const domain::TransferProgress &progress)
 {
+    if (progress.state == domain::TransferState::Completed) {
+        return 100;
+    }
     if (progress.totalBytes == 0) {
         return 0;
     }
@@ -116,12 +120,20 @@ TransferQueueWidget::QueueItem queueItemFromJob(const domain::TransferJob &job, 
     };
 }
 
+bool isTerminalTransferState(domain::TransferState state)
+{
+    return state == domain::TransferState::Completed
+        || state == domain::TransferState::Failed
+        || state == domain::TransferState::Cancelled;
+}
+
 }
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_transferQueueWidget(nullptr)
+    , m_transferProgressTimer(nullptr)
     , m_localPath(QDir::homePath())
     , m_remotePath(QStringLiteral("/"))
     , m_siteProfileRepository(sampleSites())
@@ -145,6 +157,10 @@ void MainWindow::setupInitialState()
     auto *layout = qobject_cast<QVBoxLayout *>(ui->transferQueueTab->layout());
     m_transferQueueWidget = new TransferQueueWidget(ui->transferQueueTab);
     layout->addWidget(m_transferQueueWidget);
+
+    m_transferProgressTimer = new QTimer(this);
+    m_transferProgressTimer->setInterval(500);
+    connect(m_transferProgressTimer, &QTimer::timeout, this, &MainWindow::pollTransferProgress);
 
     ui->localPaneTitleLabel->setText(tr("ローカル"));
     ui->remotePaneTitleLabel->setText(tr("リモート"));
@@ -191,6 +207,14 @@ void MainWindow::setupActions()
     connect(ui->actionNewSite, &QAction::triggered, this, &MainWindow::openSiteManager);
     connect(ui->actionConnect, &QAction::triggered, this, &MainWindow::connectToSelectedSite);
     connect(ui->actionDisconnect, &QAction::triggered, this, [this]() {
+        for (const auto &[queueJobId, backendJobId] : m_backendJobIds) {
+            const auto cancelResult = m_remoteSessionService.cancel(backendJobId);
+            if (!cancelResult.succeeded) {
+                appendLogMessage(tr("Transfer cancel failed: %1").arg(QString::fromStdString(cancelResult.error.message)));
+            }
+            m_transferQueueService.updateState(queueJobId, domain::TransferState::Cancelled);
+        }
+        m_backendJobIds.clear();
         const auto result = m_remoteSessionService.disconnect();
         if (!result.succeeded) {
             appendLogMessage(tr("Disconnect failed: %1").arg(QString::fromStdString(result.error.message)));
@@ -205,6 +229,15 @@ void MainWindow::setupActions()
     connect(ui->actionUpload, &QAction::triggered, this, &MainWindow::enqueueUpload);
     connect(ui->actionDownload, &QAction::triggered, this, &MainWindow::enqueueDownload);
     connect(ui->actionStop, &QAction::triggered, this, [this]() {
+        for (const auto &[queueJobId, backendJobId] : m_backendJobIds) {
+            (void)queueJobId;
+            const auto cancelResult = m_remoteSessionService.cancel(backendJobId);
+            if (!cancelResult.succeeded) {
+                appendLogMessage(tr("Transfer cancel failed: %1").arg(QString::fromStdString(cancelResult.error.message)));
+            }
+        }
+        m_backendJobIds.clear();
+        m_transferProgressTimer->stop();
         m_transferQueueService.clear();
         renderTransferQueue();
         appendLogMessage(tr("Transfer queue cleared"));
@@ -625,10 +658,48 @@ void MainWindow::startQueuedTransfer(domain::TransferJobId jobId)
     }
 
     m_transferQueueService.updateState(jobId, domain::TransferState::Running);
+    m_backendJobIds[jobId] = startResult.jobId;
+    if (!m_transferProgressTimer->isActive()) {
+        m_transferProgressTimer->start();
+    }
     appendLogMessage(
         tr("Transfer #%1 started as backend job #%2")
             .arg(jobId)
             .arg(startResult.jobId));
+}
+
+void MainWindow::pollTransferProgress()
+{
+    bool updated = false;
+    for (auto job = m_backendJobIds.begin(); job != m_backendJobIds.end();) {
+        const auto queueJobId = job->first;
+        const auto backendJobId = job->second;
+        const auto progressResult = m_remoteSessionService.progress(backendJobId);
+        if (!progressResult.operation.succeeded || !progressResult.found) {
+            ++job;
+            continue;
+        }
+
+        m_transferQueueService.updateProgress(
+            queueJobId,
+            progressResult.progress.transferredBytes,
+            progressResult.progress.totalBytes,
+            progressResult.progress.state);
+        updated = true;
+
+        if (isTerminalTransferState(progressResult.progress.state)) {
+            job = m_backendJobIds.erase(job);
+        } else {
+            ++job;
+        }
+    }
+
+    if (updated) {
+        renderTransferQueue();
+    }
+    if (m_backendJobIds.empty()) {
+        m_transferProgressTimer->stop();
+    }
 }
 
 void MainWindow::renderTransferQueue()

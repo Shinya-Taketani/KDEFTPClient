@@ -17,6 +17,7 @@ public:
     virtual ListDirectoryResult listDirectory(const std::string &remotePath) = 0;
     virtual StartTransferResult upload(const TransferRequest &request) = 0;
     virtual StartTransferResult download(const TransferRequest &request) = 0;
+    virtual TransferProgressResult progress(TransferJobId jobId) = 0;
     virtual OperationResult cancel(TransferJobId jobId) = 0;
 };
 

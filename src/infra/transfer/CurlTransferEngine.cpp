@@ -11,6 +11,10 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <utility>
 
@@ -95,6 +99,12 @@ size_t writeToString(char *ptr, size_t size, size_t nmemb, void *userdata)
     const auto bytes = size * nmemb;
     output->append(ptr, bytes);
     return bytes;
+}
+
+size_t writeToFile(char *ptr, size_t size, size_t nmemb, void *userdata)
+{
+    auto *file = static_cast<std::FILE *>(userdata);
+    return std::fwrite(ptr, size, nmemb, file);
 }
 
 std::string curlErrorMessage(CURLcode code, const std::array<char, CURL_ERROR_SIZE> &errorBuffer)
@@ -252,10 +262,193 @@ std::vector<domain::RemoteEntry> parseDirectoryListing(const std::string &listin
 
 namespace infra::transfer {
 
+struct CurlTransferTask {
+    explicit CurlTransferTask(TransferJobId taskJobId, const TransferRequest &taskRequest)
+        : request(taskRequest)
+        , progress {
+            .jobId = taskJobId,
+            .state = domain::TransferState::Running,
+            .transferredBytes = 0,
+            .totalBytes = taskRequest.expectedSize,
+        }
+    {
+    }
+
+    TransferRequest request;
+    mutable std::mutex mutex;
+    TransferProgress progress;
+    std::atomic_bool cancelRequested { false };
+    std::jthread worker;
+};
+
+namespace {
+
+struct CurlProgressContext {
+    std::shared_ptr<CurlTransferTask> task;
+    domain::TransferDirection direction { domain::TransferDirection::Upload };
+};
+
+int updateTransferProgress(
+    void *clientp,
+    curl_off_t downloadTotal,
+    curl_off_t downloadNow,
+    curl_off_t uploadTotal,
+    curl_off_t uploadNow)
+{
+    auto *context = static_cast<CurlProgressContext *>(clientp);
+    if (context == nullptr || context->task == nullptr) {
+        return 0;
+    }
+    if (context->task->cancelRequested.load()) {
+        return 1;
+    }
+
+    const auto total = context->direction == domain::TransferDirection::Upload ? uploadTotal : downloadTotal;
+    const auto now = context->direction == domain::TransferDirection::Upload ? uploadNow : downloadNow;
+
+    std::scoped_lock lock(context->task->mutex);
+    context->task->progress.state = domain::TransferState::Running;
+    context->task->progress.transferredBytes = now > 0 ? static_cast<std::uint64_t>(now) : 0;
+    if (total > 0) {
+        context->task->progress.totalBytes = static_cast<std::uint64_t>(total);
+    }
+    return 0;
+}
+
+void updateTaskState(
+    const std::shared_ptr<CurlTransferTask> &task,
+    domain::TransferState state,
+    std::uint64_t transferredBytes = 0,
+    std::uint64_t totalBytes = 0)
+{
+    std::scoped_lock lock(task->mutex);
+    task->progress.state = state;
+    if (transferredBytes > 0 || state == domain::TransferState::Completed) {
+        task->progress.transferredBytes = transferredBytes;
+    }
+    if (totalBytes > 0) {
+        task->progress.totalBytes = totalBytes;
+    }
+    if (state == domain::TransferState::Completed && task->progress.totalBytes > 0) {
+        task->progress.transferredBytes = task->progress.totalBytes;
+    }
+    if (state == domain::TransferState::Completed
+        && task->progress.totalBytes == 0
+        && task->progress.transferredBytes > 0) {
+        task->progress.totalBytes = task->progress.transferredBytes;
+    }
+}
+
+void finishTaskFromCurlCode(const std::shared_ptr<CurlTransferTask> &task, CURLcode code)
+{
+    if (code == CURLE_OK) {
+        updateTaskState(task, domain::TransferState::Completed);
+        return;
+    }
+    if (task->cancelRequested.load() || code == CURLE_ABORTED_BY_CALLBACK) {
+        updateTaskState(task, domain::TransferState::Cancelled);
+        return;
+    }
+
+    updateTaskState(task, domain::TransferState::Failed);
+}
+
+void performDownload(
+    const std::shared_ptr<CurlTransferTask> &task,
+    const domain::SiteProfile &siteProfile,
+    const std::string &password,
+    const std::string &url)
+{
+    auto *file = std::fopen(task->request.localPath.c_str(), "wb");
+    if (file == nullptr) {
+        updateTaskState(task, domain::TransferState::Failed);
+        return;
+    }
+
+    auto curl = curl_easy_init();
+    if (curl == nullptr) {
+        std::fclose(file);
+        updateTaskState(task, domain::TransferState::Failed);
+        return;
+    }
+
+    std::array<char, CURL_ERROR_SIZE> errorBuffer {};
+    CurlProgressContext progressContext {
+        .task = task,
+        .direction = domain::TransferDirection::Download,
+    };
+    configureCommonOptions(curl, siteProfile, password, url, errorBuffer);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeToFile);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, file);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, updateTransferProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext);
+
+    const auto code = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    std::fclose(file);
+    finishTaskFromCurlCode(task, code);
+}
+
+void performUpload(
+    const std::shared_ptr<CurlTransferTask> &task,
+    const domain::SiteProfile &siteProfile,
+    const std::string &password,
+    const std::string &url)
+{
+    auto *file = std::fopen(task->request.localPath.c_str(), "rb");
+    if (file == nullptr) {
+        updateTaskState(task, domain::TransferState::Failed);
+        return;
+    }
+
+    auto curl = curl_easy_init();
+    if (curl == nullptr) {
+        std::fclose(file);
+        updateTaskState(task, domain::TransferState::Failed);
+        return;
+    }
+
+    std::uint64_t uploadSize = task->request.expectedSize;
+    if (uploadSize == 0) {
+        std::error_code error;
+        uploadSize = std::filesystem::file_size(task->request.localPath, error);
+        if (error) {
+            uploadSize = 0;
+        }
+    }
+
+    std::array<char, CURL_ERROR_SIZE> errorBuffer {};
+    CurlProgressContext progressContext {
+        .task = task,
+        .direction = domain::TransferDirection::Upload,
+    };
+    configureCommonOptions(curl, siteProfile, password, url, errorBuffer);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_READDATA, file);
+    if (uploadSize > 0) {
+        curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(uploadSize));
+    }
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, updateTransferProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext);
+
+    const auto code = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    std::fclose(file);
+    finishTaskFromCurlCode(task, code);
+}
+
+} // namespace
+
 CurlTransferEngine::CurlTransferEngine()
 {
     ensureCurlInitialized();
 }
+
+CurlTransferEngine::~CurlTransferEngine() = default;
 
 ConnectionResult CurlTransferEngine::connect(const ConnectionRequest &request)
 {
@@ -302,6 +495,13 @@ ConnectionResult CurlTransferEngine::connect(const ConnectionRequest &request)
 
 OperationResult CurlTransferEngine::disconnect()
 {
+    {
+        std::scoped_lock lock(m_taskMutex);
+        for (const auto &[jobId, task] : m_transferTasks) {
+            (void)jobId;
+            task->cancelRequested.store(true);
+        }
+    }
     m_connectedSite.reset();
     m_sessionPassword.clear();
     return succeeded();
@@ -342,42 +542,47 @@ ListDirectoryResult CurlTransferEngine::listDirectory(const std::string &remoteP
 
 StartTransferResult CurlTransferEngine::upload(const TransferRequest &request)
 {
-    (void)request;
-
-    auto connected = ensureConnected();
-    if (!connected.succeeded) {
-        return {.operation = connected};
-    }
-
-    return {
-        .operation = failed("transfer_worker_not_implemented", "CURL transfer worker is not implemented yet."),
-    };
+    return startTransfer(request);
 }
 
 StartTransferResult CurlTransferEngine::download(const TransferRequest &request)
 {
-    (void)request;
+    return startTransfer(request);
+}
 
-    auto connected = ensureConnected();
-    if (!connected.succeeded) {
-        return {.operation = connected};
+TransferProgressResult CurlTransferEngine::progress(TransferJobId jobId)
+{
+    const auto task = findTask(jobId);
+    if (task == nullptr) {
+        return {
+            .operation = succeeded(),
+            .found = false,
+        };
     }
 
+    std::scoped_lock lock(task->mutex);
     return {
-        .operation = failed("transfer_worker_not_implemented", "CURL transfer worker is not implemented yet."),
+        .operation = succeeded(),
+        .progress = task->progress,
+        .found = true,
     };
 }
 
 OperationResult CurlTransferEngine::cancel(TransferJobId jobId)
 {
-    (void)jobId;
-
     auto connected = ensureConnected();
     if (!connected.succeeded) {
         return connected;
     }
 
-    return failed("transfer_worker_not_implemented", "CURL transfer worker is not implemented yet.");
+    const auto task = findTask(jobId);
+    if (task == nullptr) {
+        return failed("not_found", "Transfer job was not found.");
+    }
+
+    task->cancelRequested.store(true);
+    updateTaskState(task, domain::TransferState::Cancelled);
+    return succeeded();
 }
 
 OperationResult CurlTransferEngine::ensureConnected() const
@@ -406,6 +611,68 @@ std::string CurlTransferEngine::buildUrl(const std::string &remotePath) const
         << '/'
         << encodedPath.toStdString();
     return url.str();
+}
+
+StartTransferResult CurlTransferEngine::startTransfer(const TransferRequest &request)
+{
+    auto connected = ensureConnected();
+    if (!connected.succeeded) {
+        return {.operation = connected};
+    }
+    if (!m_connectedSite.has_value()) {
+        return {.operation = failed("not_connected", "No remote session is connected.")};
+    }
+
+    if (request.direction == domain::TransferDirection::Upload && !std::filesystem::exists(request.localPath)) {
+        return {.operation = failed("local_file_not_found", "Local file was not found.")};
+    }
+    if (request.direction == domain::TransferDirection::Download) {
+        const auto parentPath = std::filesystem::path(request.localPath).parent_path();
+        if (!parentPath.empty()) {
+            std::error_code error;
+            std::filesystem::create_directories(parentPath, error);
+            if (error) {
+                return {.operation = failed("create_directory_failed", error.message())};
+            }
+        }
+    }
+
+    const auto siteProfile = *m_connectedSite;
+    const auto password = m_sessionPassword;
+    const auto url = buildUrl(request.remotePath);
+
+    std::shared_ptr<CurlTransferTask> task;
+    TransferJobId jobId = 0;
+    {
+        std::scoped_lock lock(m_taskMutex);
+        jobId = m_nextJobId++;
+        task = std::make_shared<CurlTransferTask>(jobId, request);
+        m_transferTasks.emplace(jobId, task);
+    }
+
+    task->worker = std::jthread([task, siteProfile, password, url]() {
+        if (task->request.direction == domain::TransferDirection::Upload) {
+            performUpload(task, siteProfile, password, url);
+        } else {
+            performDownload(task, siteProfile, password, url);
+        }
+    });
+
+    return {
+        .operation = succeeded(),
+        .jobId = jobId,
+    };
+}
+
+std::shared_ptr<CurlTransferTask> CurlTransferEngine::findTask(TransferJobId jobId) const
+{
+    std::scoped_lock lock(m_taskMutex);
+    const auto task = m_transferTasks.find(jobId);
+    if (task == m_transferTasks.end()) {
+        return {};
+    }
+
+    return task->second;
 }
 
 } // namespace infra::transfer
