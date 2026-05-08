@@ -70,7 +70,7 @@ void SiteManagerDialog::setupUi()
     layout->setSpacing(8);
 
     m_descriptionLabel = new QLabel(
-        tr("保存済み接続先の一覧を表示するためのダミー画面です。"), this);
+        tr("保存済み接続先を選択して接続します。"), this);
     layout->addWidget(m_descriptionLabel);
 
     m_siteTable = new QTableWidget(this);
@@ -96,7 +96,13 @@ void SiteManagerDialog::setupUi()
     updateActionButtonState();
 
     connect(closeButton, &QPushButton::clicked, this, &QDialog::reject);
+    connect(m_connectButton, &QPushButton::clicked, this, &QDialog::accept);
     connect(m_siteTable, &QTableWidget::itemSelectionChanged, this, &SiteManagerDialog::updateActionButtonState);
+    connect(m_siteTable, &QTableWidget::itemDoubleClicked, this, [this]() {
+        if (selectedSiteName().has_value()) {
+            accept();
+        }
+    });
 
     layout->addWidget(buttonBox);
 }
@@ -156,7 +162,7 @@ void SiteManagerDialog::updateEmptyState(bool isEmpty)
         m_descriptionLabel->setText(
             tr("接続先はまだ登録されていません。まずは「新規」から接続先を追加してください。"));
     } else {
-        m_descriptionLabel->setText(tr("保存済み接続先の一覧を表示します。"));
+        m_descriptionLabel->setText(tr("保存済み接続先を選択して接続します。"));
     }
 
     m_siteTable->setVisible(!isEmpty);
