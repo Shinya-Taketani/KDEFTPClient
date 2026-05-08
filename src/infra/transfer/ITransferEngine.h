@@ -12,7 +12,7 @@ class ITransferEngine
 public:
     virtual ~ITransferEngine() = default;
 
-    virtual ConnectionResult connect(const domain::SiteProfile &siteProfile) = 0;
+    virtual ConnectionResult connect(const ConnectionRequest &request) = 0;
     virtual OperationResult disconnect() = 0;
     virtual ListDirectoryResult listDirectory(const std::string &remotePath) = 0;
     virtual StartTransferResult upload(const TransferRequest &request) = 0;

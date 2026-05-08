@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -420,7 +421,15 @@ void MainWindow::connectToSelectedSite()
         return;
     }
 
-    const auto connectionResult = m_remoteSessionService.connect(selectedSite.siteProfile);
+    const auto password = promptPasswordForSite(selectedSite.siteProfile);
+    if (!password.has_value()) {
+        return;
+    }
+
+    const auto connectionResult = m_remoteSessionService.connect({
+        .siteProfile = selectedSite.siteProfile,
+        .password = password->toStdString(),
+    });
     if (!connectionResult.operation.succeeded) {
         QMessageBox::warning(
             this,
@@ -431,7 +440,7 @@ void MainWindow::connectToSelectedSite()
 
     m_connected = true;
     m_currentProtocol = selectedSite.siteProfile.protocol;
-    m_remotePath = QStringLiteral("/home/%1").arg(QString::fromStdString(selectedSite.siteProfile.userName));
+    m_remotePath = QStringLiteral("/");
     ui->remotePaneTitleLabel->setText(
         tr("リモート - %1 (%2)")
             .arg(QString::fromStdString(selectedSite.siteProfile.connectionName), protocolLabel(selectedSite.siteProfile.protocol)));
@@ -444,6 +453,29 @@ void MainWindow::connectToSelectedSite()
                 authenticationLabel(selectedSite.siteProfile)));
     renderTransferQueue();
     ui->statusbar->showMessage(tr("接続しました: %1").arg(QString::fromStdString(selectedSite.siteProfile.connectionName)));
+}
+
+std::optional<QString> MainWindow::promptPasswordForSite(const domain::SiteProfile &siteProfile)
+{
+    if (siteProfile.allowAnonymousLogin
+        || siteProfile.authenticationMethod != domain::AuthenticationMethod::Password) {
+        return QString();
+    }
+
+    bool accepted = false;
+    const auto password = QInputDialog::getText(
+        this,
+        tr("パスワード入力"),
+        tr("%1@%2 のパスワード")
+            .arg(QString::fromStdString(siteProfile.userName), QString::fromStdString(siteProfile.host)),
+        QLineEdit::Password,
+        QString(),
+        &accepted);
+    if (!accepted) {
+        return std::nullopt;
+    }
+
+    return password;
 }
 
 void MainWindow::enqueueUpload()
@@ -460,6 +492,7 @@ void MainWindow::enqueueUpload()
         m_remotePath.toStdString(),
         sourceInfo.isFile() ? static_cast<std::uint64_t>(sourceInfo.size()) : 0,
         m_currentProtocol);
+    startQueuedTransfer(job.id);
     renderTransferQueue();
     appendLogMessage(
         tr("Queued upload #%1: %2 -> %3")
@@ -482,6 +515,7 @@ void MainWindow::enqueueDownload()
         m_localPath.toStdString(),
         0,
         m_currentProtocol);
+    startQueuedTransfer(job.id);
     renderTransferQueue();
     appendLogMessage(
         tr("Queued download #%1: %2 -> %3")
@@ -489,6 +523,36 @@ void MainWindow::enqueueDownload()
             .arg(QString::fromStdString(job.request.remotePath), QString::fromStdString(job.request.localPath)));
     ui->bottomTabWidget->setCurrentWidget(ui->transferQueueTab);
     ui->statusbar->showMessage(tr("ダウンロードをキューに追加しました"));
+}
+
+void MainWindow::startQueuedTransfer(domain::TransferJobId jobId)
+{
+    if (!m_connected) {
+        return;
+    }
+
+    const auto *job = m_transferQueueService.findJob(jobId);
+    if (job == nullptr) {
+        return;
+    }
+
+    const auto startResult = job->request.direction == domain::TransferDirection::Upload
+        ? m_remoteSessionService.upload(job->request)
+        : m_remoteSessionService.download(job->request);
+    if (!startResult.operation.succeeded) {
+        m_transferQueueService.updateState(jobId, domain::TransferState::Failed);
+        appendLogMessage(
+            tr("Transfer #%1 failed to start: %2")
+                .arg(jobId)
+                .arg(QString::fromStdString(startResult.operation.error.message)));
+        return;
+    }
+
+    m_transferQueueService.updateState(jobId, domain::TransferState::Running);
+    appendLogMessage(
+        tr("Transfer #%1 started as backend job #%2")
+            .arg(jobId)
+            .arg(startResult.jobId));
 }
 
 void MainWindow::renderTransferQueue()

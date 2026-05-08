@@ -1,5 +1,6 @@
 #include "app/TransferQueueService.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <string_view>
 #include <utility>
@@ -75,9 +76,55 @@ domain::TransferJob TransferQueueService::enqueueDownload(
     });
 }
 
+const domain::TransferJob *TransferQueueService::findJob(domain::TransferJobId jobId) const
+{
+    auto job = std::find_if(m_jobs.begin(), m_jobs.end(), [jobId](const auto &candidate) {
+        return candidate.id == jobId;
+    });
+
+    return job == m_jobs.end() ? nullptr : &*job;
+}
+
+bool TransferQueueService::updateState(domain::TransferJobId jobId, domain::TransferState state)
+{
+    auto *job = findMutableJob(jobId);
+    if (job == nullptr) {
+        return false;
+    }
+
+    job->progress.state = state;
+    return true;
+}
+
+bool TransferQueueService::updateProgress(
+    domain::TransferJobId jobId,
+    std::uint64_t transferredBytes,
+    std::uint64_t totalBytes,
+    domain::TransferState state)
+{
+    auto *job = findMutableJob(jobId);
+    if (job == nullptr) {
+        return false;
+    }
+
+    job->progress.transferredBytes = transferredBytes;
+    job->progress.totalBytes = totalBytes;
+    job->progress.state = state;
+    return true;
+}
+
 void TransferQueueService::clear()
 {
     m_jobs.clear();
+}
+
+domain::TransferJob *TransferQueueService::findMutableJob(domain::TransferJobId jobId)
+{
+    auto job = std::find_if(m_jobs.begin(), m_jobs.end(), [jobId](const auto &candidate) {
+        return candidate.id == jobId;
+    });
+
+    return job == m_jobs.end() ? nullptr : &*job;
 }
 
 domain::TransferJob TransferQueueService::enqueue(domain::TransferRequest request)

@@ -7,9 +7,9 @@ RemoteSessionService::RemoteSessionService(infra::transfer::ITransferEngine &tra
 {
 }
 
-infra::transfer::ConnectionResult RemoteSessionService::connect(const domain::SiteProfile &siteProfile)
+infra::transfer::ConnectionResult RemoteSessionService::connect(const infra::transfer::ConnectionRequest &request)
 {
-    return m_transferEngine.connect(siteProfile);
+    return m_transferEngine.connect(request);
 }
 
 infra::transfer::OperationResult RemoteSessionService::disconnect()
@@ -20,6 +20,21 @@ infra::transfer::OperationResult RemoteSessionService::disconnect()
 infra::transfer::ListDirectoryResult RemoteSessionService::listDirectory(const std::string &remotePath)
 {
     return m_transferEngine.listDirectory(remotePath);
+}
+
+infra::transfer::StartTransferResult RemoteSessionService::upload(const domain::TransferRequest &request)
+{
+    return m_transferEngine.upload(request);
+}
+
+infra::transfer::StartTransferResult RemoteSessionService::download(const domain::TransferRequest &request)
+{
+    return m_transferEngine.download(request);
+}
+
+infra::transfer::OperationResult RemoteSessionService::cancel(domain::TransferJobId jobId)
+{
+    return m_transferEngine.cancel(jobId);
 }
 
 } // namespace app

@@ -11,6 +11,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(CURL REQUIRED)
 
 qt_add_executable(kdeftpclient
     src/main.cpp
@@ -26,6 +27,8 @@ qt_add_executable(kdeftpclient
     src/infra/settings/JsonSiteProfileRepository.cpp
     src/infra/transfer/MockTransferEngine.h
     src/infra/transfer/MockTransferEngine.cpp
+    src/infra/transfer/CurlTransferEngine.h
+    src/infra/transfer/CurlTransferEngine.cpp
     src/ui/mainwindow.h
     src/ui/mainwindow.cpp
     src/ui/mainwindow.ui
@@ -42,6 +45,7 @@ target_include_directories(kdeftpclient PRIVATE
 )
 
 target_link_libraries(kdeftpclient PRIVATE
+    CURL::libcurl
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

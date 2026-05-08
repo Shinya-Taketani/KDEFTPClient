@@ -87,8 +87,10 @@ std::string normalizedPath(const std::string &path)
 
 namespace infra::transfer {
 
-ConnectionResult MockTransferEngine::connect(const domain::SiteProfile &siteProfile)
+ConnectionResult MockTransferEngine::connect(const ConnectionRequest &request)
 {
+    const auto &siteProfile = request.siteProfile;
+
     if (siteProfile.host.empty()) {
         return {
             .operation = failed("empty_host", "Host is required."),

@@ -24,9 +24,17 @@ public:
         const std::string &localDirectory,
         std::uint64_t expectedSize,
         domain::Protocol protocol);
+    [[nodiscard]] const domain::TransferJob *findJob(domain::TransferJobId jobId) const;
+    bool updateState(domain::TransferJobId jobId, domain::TransferState state);
+    bool updateProgress(
+        domain::TransferJobId jobId,
+        std::uint64_t transferredBytes,
+        std::uint64_t totalBytes,
+        domain::TransferState state);
     void clear();
 
 private:
+    [[nodiscard]] domain::TransferJob *findMutableJob(domain::TransferJobId jobId);
     [[nodiscard]] domain::TransferJob enqueue(domain::TransferRequest request);
 
     std::vector<domain::TransferJob> m_jobs;

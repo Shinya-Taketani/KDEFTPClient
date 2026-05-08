@@ -37,6 +37,11 @@ struct ListDirectoryResult {
     std::vector<RemoteEntry> entries;
 };
 
+struct ConnectionRequest {
+    domain::SiteProfile siteProfile;
+    std::string password;
+};
+
 struct StartTransferResult {
     OperationResult operation;
     TransferJobId jobId { 0 };

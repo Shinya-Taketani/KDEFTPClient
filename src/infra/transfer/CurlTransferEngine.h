@@ -1,15 +1,18 @@
-#ifndef INFRA_TRANSFER_MOCKTRANSFERENGINE_H
-#define INFRA_TRANSFER_MOCKTRANSFERENGINE_H
+#ifndef INFRA_TRANSFER_CURLTRANSFERENGINE_H
+#define INFRA_TRANSFER_CURLTRANSFERENGINE_H
 
 #include "infra/transfer/ITransferEngine.h"
 
 #include <optional>
+#include <string>
 
 namespace infra::transfer {
 
-class MockTransferEngine final : public ITransferEngine
+class CurlTransferEngine final : public ITransferEngine
 {
 public:
+    CurlTransferEngine();
+
     ConnectionResult connect(const ConnectionRequest &request) override;
     OperationResult disconnect() override;
     ListDirectoryResult listDirectory(const std::string &remotePath) override;
@@ -19,11 +22,13 @@ public:
 
 private:
     [[nodiscard]] OperationResult ensureConnected() const;
+    [[nodiscard]] std::string buildUrl(const std::string &remotePath) const;
 
     std::optional<domain::SiteProfile> m_connectedSite;
+    std::string m_sessionPassword;
     TransferJobId m_nextJobId { 1 };
 };
 
 } // namespace infra::transfer
 
-#endif // INFRA_TRANSFER_MOCKTRANSFERENGINE_H
+#endif // INFRA_TRANSFER_CURLTRANSFERENGINE_H
