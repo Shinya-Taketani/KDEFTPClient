@@ -14,6 +14,8 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 qt_add_executable(kdeftpclient
     src/main.cpp
+    src/app/RemoteSessionService.h
+    src/app/RemoteSessionService.cpp
     src/app/SiteProfileService.h
     src/app/SiteProfileService.cpp
     src/app/TransferQueueService.h
@@ -22,6 +24,8 @@ qt_add_executable(kdeftpclient
     src/infra/settings/InMemorySiteProfileRepository.cpp
     src/infra/settings/JsonSiteProfileRepository.h
     src/infra/settings/JsonSiteProfileRepository.cpp
+    src/infra/transfer/MockTransferEngine.h
+    src/infra/transfer/MockTransferEngine.cpp
     src/ui/mainwindow.h
     src/ui/mainwindow.cpp
     src/ui/mainwindow.ui

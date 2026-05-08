@@ -7,10 +7,13 @@
 #include <optional>
 #include <vector>
 
+#include "app/RemoteSessionService.h"
 #include "app/SiteProfileService.h"
 #include "app/TransferQueueService.h"
+#include "domain/RemoteEntry.h"
 #include "domain/SiteProfile.h"
 #include "infra/settings/JsonSiteProfileRepository.h"
+#include "infra/transfer/MockTransferEngine.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -32,7 +35,9 @@ private:
     void setupInitialState();
     void setupActions();
     void loadLocalDirectory(const QString &path);
-    void loadRemotePlaceholder(const QString &path);
+    void clearRemotePanel(const QString &path);
+    void loadRemoteDirectory(const QString &path);
+    void renderRemoteEntries(const QString &path, const std::vector<domain::RemoteEntry> &entries);
     void openSiteManager();
     void connectToSelectedSite();
     void enqueueUpload();
@@ -51,6 +56,8 @@ private:
     QString m_remotePath;
     infra::settings::JsonSiteProfileRepository m_siteProfileRepository;
     app::SiteProfileService m_siteProfileService;
+    infra::transfer::MockTransferEngine m_transferEngine;
+    app::RemoteSessionService m_remoteSessionService;
     app::TransferQueueService m_transferQueueService;
     domain::Protocol m_currentProtocol;
     bool m_connected;

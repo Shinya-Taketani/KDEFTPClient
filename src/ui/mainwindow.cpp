@@ -5,14 +5,12 @@
 #include "ui_mainwindow.h"
 
 #include <QAction>
-#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QStyle>
 #include <QTime>
 #include <QTreeWidget>
@@ -77,18 +75,6 @@ QString authenticationLabel(const domain::SiteProfile &siteProfile)
     return QObject::tr("unknown authentication");
 }
 
-QString expandUserPath(const QString &path)
-{
-    if (path == QStringLiteral("~")) {
-        return QDir::homePath();
-    }
-    if (path.startsWith(QStringLiteral("~/"))) {
-        return QDir::homePath() + path.mid(1);
-    }
-
-    return path;
-}
-
 int progressPercent(const domain::TransferProgress &progress)
 {
     if (progress.totalBytes == 0) {
@@ -139,6 +125,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_remotePath(QStringLiteral("/"))
     , m_siteProfileRepository(sampleSites())
     , m_siteProfileService(m_siteProfileRepository)
+    , m_remoteSessionService(m_transferEngine)
     , m_currentProtocol(domain::Protocol::Ftp)
     , m_connected(false)
 {
@@ -175,7 +162,7 @@ void MainWindow::setupInitialState()
 
     setupActions();
     loadLocalDirectory(m_localPath);
-    loadRemotePlaceholder(m_remotePath);
+    clearRemotePanel(m_remotePath);
     ui->logPlainTextEdit->clear();
     appendLogMessage(tr("kdeftpclient started"));
     appendLogMessage(tr("Commander-style shell ready"));
@@ -202,8 +189,12 @@ void MainWindow::setupActions()
     connect(ui->actionNewSite, &QAction::triggered, this, &MainWindow::openSiteManager);
     connect(ui->actionConnect, &QAction::triggered, this, &MainWindow::connectToSelectedSite);
     connect(ui->actionDisconnect, &QAction::triggered, this, [this]() {
+        const auto result = m_remoteSessionService.disconnect();
+        if (!result.succeeded) {
+            appendLogMessage(tr("Disconnect failed: %1").arg(QString::fromStdString(result.error.message)));
+        }
         m_connected = false;
-        loadRemotePlaceholder(QStringLiteral("/"));
+        clearRemotePanel(QStringLiteral("/"));
         renderTransferQueue();
         appendLogMessage(tr("Disconnected"));
         ui->statusbar->showMessage(tr("切断しました"));
@@ -219,7 +210,11 @@ void MainWindow::setupActions()
     });
     connect(ui->actionRefresh, &QAction::triggered, this, [this]() {
         loadLocalDirectory(m_localPath);
-        loadRemotePlaceholder(m_remotePath);
+        if (m_connected) {
+            loadRemoteDirectory(m_remotePath);
+        } else {
+            clearRemotePanel(m_remotePath);
+        }
         appendLogMessage(tr("Panels refreshed"));
     });
     connect(ui->actionToggleQueue, &QAction::triggered, this, [this](bool checked) {
@@ -237,7 +232,7 @@ void MainWindow::setupActions()
         loadLocalDirectory(ui->localPathLineEdit->text());
     });
     connect(ui->remotePathLineEdit, &QLineEdit::returnPressed, this, [this]() {
-        loadRemotePlaceholder(ui->remotePathLineEdit->text());
+        loadRemoteDirectory(ui->remotePathLineEdit->text());
     });
     connect(ui->localFileTreeWidget, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         if (item != nullptr && item->data(0, Qt::UserRole + 1).toBool()) {
@@ -246,7 +241,7 @@ void MainWindow::setupActions()
     });
     connect(ui->remoteFileTreeWidget, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         if (item != nullptr && item->data(0, Qt::UserRole + 1).toBool()) {
-            loadRemotePlaceholder(item->data(0, Qt::UserRole).toString());
+            loadRemoteDirectory(item->data(0, Qt::UserRole).toString());
         }
     });
 }
@@ -286,7 +281,7 @@ void MainWindow::loadLocalDirectory(const QString &path)
     }
 }
 
-void MainWindow::loadRemotePlaceholder(const QString &path)
+void MainWindow::clearRemotePanel(const QString &path)
 {
     QString normalizedPath = path.trimmed();
     if (normalizedPath.isEmpty()) {
@@ -299,6 +294,44 @@ void MainWindow::loadRemotePlaceholder(const QString &path)
     m_remotePath = QDir::cleanPath(normalizedPath);
     ui->remotePathLineEdit->setText(m_remotePath);
     ui->remoteFileTreeWidget->clear();
+    ui->remotePaneTitleLabel->setText(tr("リモート - 未接続"));
+}
+
+void MainWindow::loadRemoteDirectory(const QString &path)
+{
+    if (!m_connected) {
+        clearRemotePanel(path);
+        ui->statusbar->showMessage(tr("リモートに接続していません"));
+        return;
+    }
+
+    QString normalizedPath = path.trimmed();
+    if (normalizedPath.isEmpty()) {
+        normalizedPath = QStringLiteral("/");
+    }
+    if (!normalizedPath.startsWith(QLatin1Char('/'))) {
+        normalizedPath.prepend(QLatin1Char('/'));
+    }
+    normalizedPath = QDir::cleanPath(normalizedPath);
+
+    const auto result = m_remoteSessionService.listDirectory(normalizedPath.toStdString());
+    if (!result.operation.succeeded) {
+        QMessageBox::warning(
+            this,
+            tr("リモート一覧"),
+            tr("リモートディレクトリを取得できませんでした: %1")
+                .arg(QString::fromStdString(result.operation.error.message)));
+        return;
+    }
+
+    renderRemoteEntries(normalizedPath, result.entries);
+}
+
+void MainWindow::renderRemoteEntries(const QString &path, const std::vector<domain::RemoteEntry> &entries)
+{
+    m_remotePath = path;
+    ui->remotePathLineEdit->setText(m_remotePath);
+    ui->remoteFileTreeWidget->clear();
 
     if (m_remotePath != QStringLiteral("/")) {
         auto *parentItem = new QTreeWidgetItem({QStringLiteral(".."), QStringLiteral("<DIR>"), QString()});
@@ -307,23 +340,15 @@ void MainWindow::loadRemotePlaceholder(const QString &path)
         ui->remoteFileTreeWidget->addTopLevelItem(parentItem);
     }
 
-    const QList<QTreeWidgetItem *> items {
-        new QTreeWidgetItem({QStringLiteral("incoming"), QStringLiteral("<DIR>"), QStringLiteral("2026-05-09 09:10")}),
-        new QTreeWidgetItem({QStringLiteral("releases"), QStringLiteral("<DIR>"), QStringLiteral("2026-05-09 09:11")}),
-        new QTreeWidgetItem({QStringLiteral("README.txt"), QStringLiteral("12 KB"), QStringLiteral("2026-05-08 18:20")}),
-        new QTreeWidgetItem({QStringLiteral("release.tar.gz"), QStringLiteral("48 MB"), QStringLiteral("2026-05-07 14:10")}),
-    };
-
-    for (QTreeWidgetItem *item : items) {
-        const bool isDirectory = item->text(1) == QStringLiteral("<DIR>");
-        const QString fullPath = QDir::cleanPath(m_remotePath + QLatin1Char('/') + item->text(0));
-        item->setData(0, Qt::UserRole, fullPath);
-        item->setData(0, Qt::UserRole + 1, isDirectory);
+    for (const auto &entry : entries) {
+        auto *item = new QTreeWidgetItem({
+            QString::fromStdString(entry.name),
+            entry.isDirectory ? QStringLiteral("<DIR>") : formattedSize(static_cast<qint64>(entry.size)),
+            QStringLiteral("-"),
+        });
+        item->setData(0, Qt::UserRole, QString::fromStdString(entry.path));
+        item->setData(0, Qt::UserRole + 1, entry.isDirectory);
         ui->remoteFileTreeWidget->addTopLevelItem(item);
-    }
-
-    if (!m_connected) {
-        ui->remotePaneTitleLabel->setText(tr("リモート - 未接続プレビュー"));
     }
 }
 
@@ -395,16 +420,13 @@ void MainWindow::connectToSelectedSite()
         return;
     }
 
-    if (selectedSite.siteProfile.authenticationMethod == domain::AuthenticationMethod::PrivateKey) {
-        const auto keyPath = expandUserPath(QString::fromStdString(selectedSite.siteProfile.privateKeyPath).trimmed());
-        if (keyPath.trimmed().isEmpty()) {
-            QMessageBox::warning(this, tr("接続"), tr("キーファイルが指定されていません。"));
-            return;
-        }
-        if (!QFileInfo::exists(keyPath)) {
-            QMessageBox::warning(this, tr("接続"), tr("キーファイルが見つかりません: %1").arg(keyPath));
-            return;
-        }
+    const auto connectionResult = m_remoteSessionService.connect(selectedSite.siteProfile);
+    if (!connectionResult.operation.succeeded) {
+        QMessageBox::warning(
+            this,
+            tr("接続"),
+            tr("接続できませんでした: %1").arg(QString::fromStdString(connectionResult.operation.error.message)));
+        return;
     }
 
     m_connected = true;
@@ -413,7 +435,7 @@ void MainWindow::connectToSelectedSite()
     ui->remotePaneTitleLabel->setText(
         tr("リモート - %1 (%2)")
             .arg(QString::fromStdString(selectedSite.siteProfile.connectionName), protocolLabel(selectedSite.siteProfile.protocol)));
-    loadRemotePlaceholder(m_remotePath);
+    loadRemoteDirectory(m_remotePath);
     appendLogMessage(
         tr("Connected to %1 via %2 using %3")
             .arg(
