@@ -12,15 +12,21 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 find_package(CURL REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 qt_add_executable(kdeftpclient
     src/main.cpp
+    src/app/CredentialService.h
+    src/app/CredentialService.cpp
     src/app/RemoteSessionService.h
     src/app/RemoteSessionService.cpp
     src/app/SiteProfileService.h
     src/app/SiteProfileService.cpp
     src/app/TransferQueueService.h
     src/app/TransferQueueService.cpp
+    src/infra/credentials/ICredentialStore.h
+    src/infra/credentials/EncryptedFileCredentialStore.h
+    src/infra/credentials/EncryptedFileCredentialStore.cpp
     src/infra/settings/InMemorySiteProfileRepository.h
     src/infra/settings/InMemorySiteProfileRepository.cpp
     src/infra/settings/JsonSiteProfileRepository.h
@@ -46,6 +52,7 @@ target_include_directories(kdeftpclient PRIVATE
 
 target_link_libraries(kdeftpclient PRIVATE
     CURL::libcurl
+    OpenSSL::Crypto
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

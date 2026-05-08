@@ -7,11 +7,13 @@
 #include <optional>
 #include <vector>
 
+#include "app/CredentialService.h"
 #include "app/RemoteSessionService.h"
 #include "app/SiteProfileService.h"
 #include "app/TransferQueueService.h"
 #include "domain/RemoteEntry.h"
 #include "domain/SiteProfile.h"
+#include "infra/credentials/EncryptedFileCredentialStore.h"
 #include "infra/settings/JsonSiteProfileRepository.h"
 #include "infra/transfer/CurlTransferEngine.h"
 
@@ -41,6 +43,8 @@ private:
     void openSiteManager();
     void connectToSelectedSite();
     [[nodiscard]] std::optional<QString> promptPasswordForSite(const domain::SiteProfile &siteProfile);
+    [[nodiscard]] std::optional<QString> promptMasterPassword(const QString &title, const QString &label);
+    bool savePasswordIfRequested(const domain::SiteProfile &siteProfile, const QString &password);
     void enqueueUpload();
     void enqueueDownload();
     void startQueuedTransfer(domain::TransferJobId jobId);
@@ -58,6 +62,8 @@ private:
     QString m_remotePath;
     infra::settings::JsonSiteProfileRepository m_siteProfileRepository;
     app::SiteProfileService m_siteProfileService;
+    infra::credentials::EncryptedFileCredentialStore m_credentialStore;
+    app::CredentialService m_credentialService;
     infra::transfer::CurlTransferEngine m_transferEngine;
     app::RemoteSessionService m_remoteSessionService;
     app::TransferQueueService m_transferQueueService;

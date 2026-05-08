@@ -51,6 +51,8 @@ SiteProfileDialog::SiteProfileDialog(QWidget *parent)
     , m_userNameLineEdit(nullptr)
     , m_protocolComboBox(nullptr)
     , m_authenticationComboBox(nullptr)
+    , m_passwordLineEdit(nullptr)
+    , m_savePasswordCheckBox(nullptr)
     , m_privateKeyPathLineEdit(nullptr)
     , m_browsePrivateKeyButton(nullptr)
     , m_passiveModeCheckBox(nullptr)
@@ -86,6 +88,16 @@ domain::SiteProfile SiteProfileDialog::siteProfile() const
     siteProfile.passiveMode = m_passiveModeCheckBox->isChecked();
     siteProfile.allowAnonymousLogin = m_anonymousLoginCheckBox->isChecked();
     return siteProfile;
+}
+
+bool SiteProfileDialog::shouldSavePassword() const
+{
+    return m_savePasswordCheckBox->isChecked();
+}
+
+QString SiteProfileDialog::passwordForSaving() const
+{
+    return m_passwordLineEdit->text();
 }
 
 void SiteProfileDialog::setupUi()
@@ -126,6 +138,13 @@ void SiteProfileDialog::setupUi()
     m_authenticationComboBox->addItem(tr("キーファイル"));
     formLayout->addRow(tr("認証方式"), m_authenticationComboBox);
 
+    m_passwordLineEdit = new QLineEdit(this);
+    m_passwordLineEdit->setEchoMode(QLineEdit::Password);
+    formLayout->addRow(tr("パスワード"), m_passwordLineEdit);
+
+    m_savePasswordCheckBox = new QCheckBox(tr("パスワードを暗号化して保存"), this);
+    formLayout->addRow(QString(), m_savePasswordCheckBox);
+
     auto *privateKeyLayout = new QHBoxLayout;
     privateKeyLayout->setContentsMargins(0, 0, 0, 0);
     privateKeyLayout->setSpacing(6);
@@ -162,6 +181,10 @@ void SiteProfileDialog::setupUi()
             QMessageBox::warning(this, tr("接続先"), tr("キーファイルを指定してください。"));
             return;
         }
+        if (m_savePasswordCheckBox->isChecked() && m_passwordLineEdit->text().isEmpty()) {
+            QMessageBox::warning(this, tr("接続先"), tr("保存するパスワードを入力してください。"));
+            return;
+        }
 
         accept();
     });
@@ -171,6 +194,7 @@ void SiteProfileDialog::setupUi()
     connect(m_protocolComboBox, &QComboBox::currentIndexChanged, this, &SiteProfileDialog::updatePortForProtocol);
     connect(m_protocolComboBox, &QComboBox::currentIndexChanged, this, &SiteProfileDialog::updateAuthenticationControls);
     connect(m_authenticationComboBox, &QComboBox::currentIndexChanged, this, &SiteProfileDialog::updateAuthenticationControls);
+    connect(m_anonymousLoginCheckBox, &QCheckBox::toggled, this, &SiteProfileDialog::updateAuthenticationControls);
     connect(m_browsePrivateKeyButton, &QPushButton::clicked, this, &SiteProfileDialog::browsePrivateKeyFile);
 }
 
@@ -201,10 +225,18 @@ void SiteProfileDialog::updateAuthenticationControls()
 {
     const bool isSftp = selectedProtocol() == domain::Protocol::Sftp;
     const bool usesPrivateKey = selectedAuthenticationMethod() == domain::AuthenticationMethod::PrivateKey;
+    const bool passwordAvailable = !usesPrivateKey && !m_anonymousLoginCheckBox->isChecked();
 
     m_authenticationComboBox->setEnabled(isSftp);
+    m_passwordLineEdit->setEnabled(passwordAvailable);
+    m_savePasswordCheckBox->setEnabled(passwordAvailable);
     m_privateKeyPathLineEdit->setEnabled(isSftp && usesPrivateKey);
     m_browsePrivateKeyButton->setEnabled(isSftp && usesPrivateKey);
+
+    if (!passwordAvailable) {
+        m_savePasswordCheckBox->setChecked(false);
+        m_passwordLineEdit->clear();
+    }
 
     if (!isSftp) {
         m_authenticationComboBox->setCurrentIndex(authenticationIndex(domain::AuthenticationMethod::Password));

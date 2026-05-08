@@ -20,6 +20,8 @@ public:
 
     void setSiteProfile(const domain::SiteProfile &siteProfile);
     [[nodiscard]] domain::SiteProfile siteProfile() const;
+    [[nodiscard]] bool shouldSavePassword() const;
+    [[nodiscard]] QString passwordForSaving() const;
 
 private:
     void setupUi();
@@ -35,6 +37,8 @@ private:
     QLineEdit *m_userNameLineEdit;
     QComboBox *m_protocolComboBox;
     QComboBox *m_authenticationComboBox;
+    QLineEdit *m_passwordLineEdit;
+    QCheckBox *m_savePasswordCheckBox;
     QLineEdit *m_privateKeyPathLineEdit;
     QPushButton *m_browsePrivateKeyButton;
     QCheckBox *m_passiveModeCheckBox;

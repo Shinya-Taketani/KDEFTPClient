@@ -126,6 +126,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_remotePath(QStringLiteral("/"))
     , m_siteProfileRepository(sampleSites())
     , m_siteProfileService(m_siteProfileRepository)
+    , m_credentialService(m_credentialStore)
     , m_remoteSessionService(m_transferEngine)
     , m_currentProtocol(domain::Protocol::Ftp)
     , m_connected(false)
@@ -382,6 +383,10 @@ void MainWindow::openSiteManager()
             QMessageBox::warning(this, tr("接続先の削除"), tr("接続先を削除できませんでした。"));
             return;
         }
+        const auto removeCredentialResult = m_credentialService.removePassword(connectionName.toStdString());
+        if (!removeCredentialResult.succeeded) {
+            appendLogMessage(tr("Saved credential was not removed for site: %1").arg(connectionName));
+        }
 
         appendLogMessage(tr("Site profile removed: %1").arg(connectionName));
         refreshSiteManagerDialog(dialog);
@@ -462,6 +467,29 @@ std::optional<QString> MainWindow::promptPasswordForSite(const domain::SiteProfi
         return QString();
     }
 
+    if (m_credentialService.hasPassword(siteProfile.connectionName)) {
+        const auto masterPassword = promptMasterPassword(
+            tr("保存済みパスワード"),
+            tr("保存済みパスワードを復号するマスターパスワード"));
+        if (!masterPassword.has_value()) {
+            return std::nullopt;
+        }
+
+        const auto readResult = m_credentialService.readPassword(
+            siteProfile.connectionName,
+            masterPassword->toStdString());
+        if (!readResult.operation.succeeded) {
+            QMessageBox::warning(
+                this,
+                tr("パスワード"),
+                tr("保存済みパスワードを復号できませんでした。マスターパスワードを確認してください。"));
+            return std::nullopt;
+        }
+        if (readResult.found) {
+            return QString::fromStdString(readResult.password);
+        }
+    }
+
     bool accepted = false;
     const auto password = QInputDialog::getText(
         this,
@@ -476,6 +504,54 @@ std::optional<QString> MainWindow::promptPasswordForSite(const domain::SiteProfi
     }
 
     return password;
+}
+
+std::optional<QString> MainWindow::promptMasterPassword(const QString &title, const QString &label)
+{
+    bool accepted = false;
+    const auto masterPassword = QInputDialog::getText(
+        this,
+        title,
+        label,
+        QLineEdit::Password,
+        QString(),
+        &accepted);
+    if (!accepted) {
+        return std::nullopt;
+    }
+
+    if (masterPassword.isEmpty()) {
+        QMessageBox::warning(this, title, tr("マスターパスワードを入力してください。"));
+        return std::nullopt;
+    }
+
+    return masterPassword;
+}
+
+bool MainWindow::savePasswordIfRequested(const domain::SiteProfile &siteProfile, const QString &password)
+{
+    if (password.isEmpty()) {
+        return true;
+    }
+
+    const auto masterPassword = promptMasterPassword(
+        tr("パスワード保存"),
+        tr("保存するパスワードを暗号化するためのマスターパスワード"));
+    if (!masterPassword.has_value()) {
+        return false;
+    }
+
+    const auto result = m_credentialService.savePassword(
+        siteProfile.connectionName,
+        password.toStdString(),
+        masterPassword->toStdString());
+    if (!result.succeeded) {
+        QMessageBox::warning(this, tr("パスワード保存"), tr("パスワードを保存できませんでした。"));
+        return false;
+    }
+
+    appendLogMessage(tr("Encrypted password saved for site: %1").arg(QString::fromStdString(siteProfile.connectionName)));
+    return true;
 }
 
 void MainWindow::enqueueUpload()
@@ -590,10 +666,17 @@ bool MainWindow::editSiteProfile(const std::optional<QString> &connectionName)
         QMessageBox::warning(this, tr("接続先"), tr("接続先を保存できませんでした。"));
         return false;
     }
+    if (dialog.shouldSavePassword() && !savePasswordIfRequested(profile, dialog.passwordForSaving())) {
+        return false;
+    }
     if (connectionName.has_value() && *connectionName != QString::fromStdString(profile.connectionName)) {
         const auto removeOldResult = m_siteProfileService.removeProfile(connectionName->toStdString());
         if (!removeOldResult.succeeded) {
             appendLogMessage(tr("Old site profile name was not removed: %1").arg(*connectionName));
+        }
+        const auto removeCredentialResult = m_credentialService.removePassword(connectionName->toStdString());
+        if (!removeCredentialResult.succeeded) {
+            appendLogMessage(tr("Saved credential was not removed for old site name: %1").arg(*connectionName));
         }
     }
 
