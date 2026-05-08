@@ -101,6 +101,15 @@ std::string joinRemotePath(const std::string &directory, const std::string &name
     return directory + "/" + name;
 }
 
+std::string defaultRemotePathForSite(const domain::SiteProfile &siteProfile)
+{
+    if (!siteProfile.initialRemotePath.empty()) {
+        return siteProfile.initialRemotePath;
+    }
+
+    return siteProfile.protocol == domain::Protocol::Sftp ? "~" : "/";
+}
+
 bool containsReplacementCharacter(const QString &text)
 {
     return text.contains(QChar(0xfffd));
@@ -300,6 +309,22 @@ bool configureAuthentication(CURL *curl, const domain::SiteProfile &siteProfile,
     return true;
 }
 
+std::string mlsdModifiedTime(const QString &facts)
+{
+    const QRegularExpression modifyExpression(
+        QStringLiteral("(^|;)modify=(\\d{14})"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match = modifyExpression.match(facts);
+    if (!match.hasMatch()) {
+        return {};
+    }
+
+    const auto value = match.captured(2);
+    return QStringLiteral("%1-%2-%3 %4:%5")
+        .arg(value.mid(0, 4), value.mid(4, 2), value.mid(6, 2), value.mid(8, 2), value.mid(10, 2))
+        .toStdString();
+}
+
 void configureCommonOptions(
     CURL *curl,
     const domain::SiteProfile &siteProfile,
@@ -364,6 +389,7 @@ std::optional<domain::RemoteEntry> parseMlsdLine(const QString &line, const std:
         .path = joinRemotePath(directory, name.toStdString()),
         .isDirectory = isDirectory,
         .size = size,
+        .modifiedTime = mlsdModifiedTime(facts),
     };
 }
 
@@ -404,21 +430,22 @@ std::optional<domain::RemoteEntry> parseUnixListLine(const QString &line, const 
         .path = joinRemotePath(directory, name.toStdString()),
         .isDirectory = type == QLatin1Char('d'),
         .size = columns.at(4).toULongLong(),
+        .modifiedTime = QStringList(columns.mid(5, 3)).join(QLatin1Char(' ')).toStdString(),
     };
 }
 
 std::optional<domain::RemoteEntry> parseDosListLine(const QString &line, const std::string &directory)
 {
     static const QRegularExpression dosListExpression(
-        QStringLiteral(R"(^\d{2}-\d{2}-\d{2,4}\s+\d{1,2}:\d{2}\s*[AP]M\s+(<DIR>|\d+)\s+(.+)$)"),
+        QStringLiteral(R"(^(\d{2}-\d{2}-\d{2,4})\s+(\d{1,2}:\d{2})\s*([AP]M)\s+(<DIR>|\d+)\s+(.+)$)"),
         QRegularExpression::CaseInsensitiveOption);
     const auto match = dosListExpression.match(line);
     if (!match.hasMatch()) {
         return std::nullopt;
     }
 
-    const auto sizeOrDirectory = match.captured(1);
-    const auto name = match.captured(2).trimmed();
+    const auto sizeOrDirectory = match.captured(4);
+    const auto name = match.captured(5).trimmed();
     if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral("..")) {
         return std::nullopt;
     }
@@ -429,6 +456,9 @@ std::optional<domain::RemoteEntry> parseDosListLine(const QString &line, const s
         .path = joinRemotePath(directory, name.toStdString()),
         .isDirectory = isDirectory,
         .size = isDirectory ? 0 : sizeOrDirectory.toULongLong(),
+        .modifiedTime = QStringLiteral("%1 %2 %3")
+            .arg(match.captured(1), match.captured(2), match.captured(3).toUpper())
+            .toStdString(),
     };
 }
 
@@ -684,7 +714,7 @@ ConnectionResult CurlTransferEngine::connect(const ConnectionRequest &request)
 
     m_connectedSite = siteProfile;
     m_sessionPassword = request.password;
-    const auto listResult = listDirectory(siteProfile.protocol == domain::Protocol::Sftp ? "~" : "/");
+    const auto listResult = listDirectory(defaultRemotePathForSite(siteProfile));
     if (!listResult.operation.succeeded) {
         m_connectedSite.reset();
         m_sessionPassword.clear();

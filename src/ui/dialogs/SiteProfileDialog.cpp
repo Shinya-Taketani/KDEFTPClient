@@ -67,6 +67,9 @@ SiteProfileDialog::SiteProfileDialog(QWidget *parent)
     , m_userNameLineEdit(nullptr)
     , m_protocolComboBox(nullptr)
     , m_authenticationComboBox(nullptr)
+    , m_initialLocalPathLineEdit(nullptr)
+    , m_browseInitialLocalPathButton(nullptr)
+    , m_initialRemotePathLineEdit(nullptr)
     , m_filenameEncodingComboBox(nullptr)
     , m_passwordLineEdit(nullptr)
     , m_savePasswordCheckBox(nullptr)
@@ -86,11 +89,25 @@ void SiteProfileDialog::setSiteProfile(const domain::SiteProfile &siteProfile)
     m_userNameLineEdit->setText(QString::fromStdString(siteProfile.userName));
     m_protocolComboBox->setCurrentIndex(protocolIndex(siteProfile.protocol));
     m_authenticationComboBox->setCurrentIndex(authenticationIndex(siteProfile.authenticationMethod));
+    m_initialLocalPathLineEdit->setText(QString::fromStdString(siteProfile.initialLocalPath));
+    m_initialRemotePathLineEdit->setText(QString::fromStdString(siteProfile.initialRemotePath));
     m_filenameEncodingComboBox->setCurrentIndex(filenameEncodingIndex(siteProfile.filenameEncoding));
     m_privateKeyPathLineEdit->setText(QString::fromStdString(siteProfile.privateKeyPath));
     m_passiveModeCheckBox->setChecked(siteProfile.passiveMode);
     m_anonymousLoginCheckBox->setChecked(siteProfile.allowAnonymousLogin);
     updateAuthenticationControls();
+}
+
+void SiteProfileDialog::setHasSavedPassword(bool hasSavedPassword)
+{
+    m_passwordLineEdit->setPlaceholderText(
+        hasSavedPassword
+            ? tr("保存済み。変更する場合のみ入力")
+            : QString());
+    m_savePasswordCheckBox->setText(
+        hasSavedPassword
+            ? tr("入力したパスワードで保存済みパスワードを更新")
+            : tr("パスワードを暗号化して保存"));
 }
 
 domain::SiteProfile SiteProfileDialog::siteProfile() const
@@ -102,6 +119,8 @@ domain::SiteProfile SiteProfileDialog::siteProfile() const
     siteProfile.userName = m_userNameLineEdit->text().trimmed().toStdString();
     siteProfile.protocol = selectedProtocol();
     siteProfile.authenticationMethod = selectedAuthenticationMethod();
+    siteProfile.initialLocalPath = m_initialLocalPathLineEdit->text().trimmed().toStdString();
+    siteProfile.initialRemotePath = m_initialRemotePathLineEdit->text().trimmed().toStdString();
     siteProfile.filenameEncoding = selectedFilenameEncoding();
     siteProfile.privateKeyPath = m_privateKeyPathLineEdit->text().trimmed().toStdString();
     siteProfile.passiveMode = m_passiveModeCheckBox->isChecked();
@@ -122,7 +141,7 @@ QString SiteProfileDialog::passwordForSaving() const
 void SiteProfileDialog::setupUi()
 {
     setWindowTitle(tr("接続先"));
-    resize(520, 420);
+    resize(560, 500);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 12, 12, 12);
@@ -156,6 +175,22 @@ void SiteProfileDialog::setupUi()
     m_authenticationComboBox->addItem(tr("パスワード"));
     m_authenticationComboBox->addItem(tr("キーファイル"));
     formLayout->addRow(tr("認証方式"), m_authenticationComboBox);
+
+    auto *initialLocalPathLayout = new QHBoxLayout;
+    initialLocalPathLayout->setContentsMargins(0, 0, 0, 0);
+    initialLocalPathLayout->setSpacing(6);
+
+    m_initialLocalPathLineEdit = new QLineEdit(this);
+    m_initialLocalPathLineEdit->setPlaceholderText(QDir::homePath());
+    initialLocalPathLayout->addWidget(m_initialLocalPathLineEdit);
+
+    m_browseInitialLocalPathButton = new QPushButton(tr("参照"), this);
+    initialLocalPathLayout->addWidget(m_browseInitialLocalPathButton);
+    formLayout->addRow(tr("初期ローカルフォルダー"), initialLocalPathLayout);
+
+    m_initialRemotePathLineEdit = new QLineEdit(this);
+    m_initialRemotePathLineEdit->setPlaceholderText(tr("例: ~ または /var/www"));
+    formLayout->addRow(tr("初期リモートフォルダー"), m_initialRemotePathLineEdit);
 
     m_filenameEncodingComboBox = new QComboBox(this);
     m_filenameEncodingComboBox->addItem(tr("自動"));
@@ -221,6 +256,12 @@ void SiteProfileDialog::setupUi()
     connect(m_protocolComboBox, &QComboBox::currentIndexChanged, this, &SiteProfileDialog::updateAuthenticationControls);
     connect(m_authenticationComboBox, &QComboBox::currentIndexChanged, this, &SiteProfileDialog::updateAuthenticationControls);
     connect(m_anonymousLoginCheckBox, &QCheckBox::toggled, this, &SiteProfileDialog::updateAuthenticationControls);
+    connect(m_passwordLineEdit, &QLineEdit::textChanged, this, [this](const QString &password) {
+        if (!password.isEmpty() && m_savePasswordCheckBox->isEnabled()) {
+            m_savePasswordCheckBox->setChecked(true);
+        }
+    });
+    connect(m_browseInitialLocalPathButton, &QPushButton::clicked, this, &SiteProfileDialog::browseInitialLocalPath);
     connect(m_browsePrivateKeyButton, &QPushButton::clicked, this, &SiteProfileDialog::browsePrivateKeyFile);
 }
 
@@ -266,6 +307,19 @@ void SiteProfileDialog::updateAuthenticationControls()
 
     if (!isSftp) {
         m_authenticationComboBox->setCurrentIndex(authenticationIndex(domain::AuthenticationMethod::Password));
+    }
+}
+
+void SiteProfileDialog::browseInitialLocalPath()
+{
+    const auto selectedPath = QFileDialog::getExistingDirectory(
+        this,
+        tr("初期ローカルフォルダーを選択"),
+        m_initialLocalPathLineEdit->text().trimmed().isEmpty()
+            ? QDir::homePath()
+            : m_initialLocalPathLineEdit->text().trimmed());
+    if (!selectedPath.isEmpty()) {
+        m_initialLocalPathLineEdit->setText(selectedPath);
     }
 }
 

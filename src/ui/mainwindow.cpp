@@ -55,6 +55,19 @@ QString remoteFileNameFromPath(const QString &remotePath)
     return fileName.isEmpty() ? normalizedPath : fileName;
 }
 
+QString expandLocalPathForUi(const QString &path)
+{
+    const QString trimmedPath = path.trimmed();
+    if (trimmedPath == QStringLiteral("~")) {
+        return QDir::homePath();
+    }
+    if (trimmedPath.startsWith(QStringLiteral("~/"))) {
+        return QDir::homePath() + trimmedPath.mid(1);
+    }
+
+    return trimmedPath;
+}
+
 QString normalizedRemotePathForUi(const QString &path, const QString &fallbackPath = QStringLiteral("/"))
 {
     QString normalizedPath = path.trimmed();
@@ -75,6 +88,10 @@ QString normalizedRemotePathForUi(const QString &path, const QString &fallbackPa
 
 QString defaultRemotePathForSite(const domain::SiteProfile &siteProfile)
 {
+    if (!siteProfile.initialRemotePath.empty()) {
+        return normalizedRemotePathForUi(QString::fromStdString(siteProfile.initialRemotePath));
+    }
+
     return siteProfile.protocol == domain::Protocol::Sftp
         ? QStringLiteral("~")
         : QStringLiteral("/");
@@ -425,7 +442,7 @@ void MainWindow::renderRemoteEntries(const QString &path, const std::vector<doma
         auto *item = new QTreeWidgetItem({
             QString::fromStdString(entry.name),
             entry.isDirectory ? QStringLiteral("<DIR>") : formattedSize(static_cast<qint64>(entry.size)),
-            QStringLiteral("-"),
+            entry.modifiedTime.empty() ? QStringLiteral("-") : QString::fromStdString(entry.modifiedTime),
         });
         item->setData(0, Qt::UserRole, QString::fromStdString(entry.path));
         item->setData(0, Qt::UserRole + 1, entry.isDirectory);
@@ -573,6 +590,9 @@ void MainWindow::connectToSite(const QString &connectionName)
     m_connected = true;
     m_currentProtocol = selectedSite.siteProfile.protocol;
     m_remotePath = defaultRemotePathForSite(selectedSite.siteProfile);
+    if (!selectedSite.siteProfile.initialLocalPath.empty()) {
+        loadLocalDirectory(expandLocalPathForUi(QString::fromStdString(selectedSite.siteProfile.initialLocalPath)));
+    }
     ui->remotePaneTitleLabel->setText(
         tr("リモート - %1 (%2)")
             .arg(QString::fromStdString(selectedSite.siteProfile.connectionName), protocolLabel(selectedSite.siteProfile.protocol)));
@@ -907,6 +927,9 @@ std::optional<QString> MainWindow::editSiteProfile(const std::optional<QString> 
         }
 
         dialog.setSiteProfile(existingProfile.siteProfile);
+        dialog.setHasSavedPassword(m_credentialService.hasPassword(existingProfile.siteProfile.connectionName));
+    } else {
+        dialog.setHasSavedPassword(false);
     }
 
     if (dialog.exec() != QDialog::Accepted) {

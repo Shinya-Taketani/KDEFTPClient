@@ -104,6 +104,8 @@ QJsonObject toJson(const domain::SiteProfile &siteProfile)
     object.insert(QStringLiteral("protocol"), protocolName(siteProfile.protocol));
     object.insert(QStringLiteral("authenticationMethod"), authenticationMethodName(siteProfile.authenticationMethod));
     object.insert(QStringLiteral("privateKeyPath"), QString::fromStdString(siteProfile.privateKeyPath));
+    object.insert(QStringLiteral("initialLocalPath"), QString::fromStdString(siteProfile.initialLocalPath));
+    object.insert(QStringLiteral("initialRemotePath"), QString::fromStdString(siteProfile.initialRemotePath));
     object.insert(QStringLiteral("filenameEncoding"), filenameEncodingName(siteProfile.filenameEncoding));
     object.insert(QStringLiteral("passiveMode"), siteProfile.passiveMode);
     object.insert(QStringLiteral("allowAnonymousLogin"), siteProfile.allowAnonymousLogin);
@@ -123,6 +125,8 @@ domain::SiteProfile fromJson(const QJsonObject &object)
     siteProfile.authenticationMethod =
         authenticationMethodFromName(object.value(QStringLiteral("authenticationMethod")).toString());
     siteProfile.privateKeyPath = object.value(QStringLiteral("privateKeyPath")).toString().toStdString();
+    siteProfile.initialLocalPath = object.value(QStringLiteral("initialLocalPath")).toString().toStdString();
+    siteProfile.initialRemotePath = object.value(QStringLiteral("initialRemotePath")).toString().toStdString();
     siteProfile.filenameEncoding =
         filenameEncodingFromName(object.value(QStringLiteral("filenameEncoding")).toString());
     siteProfile.passiveMode = object.value(QStringLiteral("passiveMode")).toBool(true);

@@ -11,6 +11,7 @@ struct RemoteEntry {
     std::string path;
     bool isDirectory { false };
     std::uint64_t size { 0 };
+    std::string modifiedTime;
 };
 
 } // namespace domain

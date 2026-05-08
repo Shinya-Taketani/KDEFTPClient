@@ -19,6 +19,7 @@ public:
     explicit SiteProfileDialog(QWidget *parent = nullptr);
 
     void setSiteProfile(const domain::SiteProfile &siteProfile);
+    void setHasSavedPassword(bool hasSavedPassword);
     [[nodiscard]] domain::SiteProfile siteProfile() const;
     [[nodiscard]] bool shouldSavePassword() const;
     [[nodiscard]] QString passwordForSaving() const;
@@ -27,6 +28,7 @@ private:
     void setupUi();
     void updatePortForProtocol(int protocolIndex);
     void updateAuthenticationControls();
+    void browseInitialLocalPath();
     void browsePrivateKeyFile();
     [[nodiscard]] domain::Protocol selectedProtocol() const;
     [[nodiscard]] domain::AuthenticationMethod selectedAuthenticationMethod() const;
@@ -38,6 +40,9 @@ private:
     QLineEdit *m_userNameLineEdit;
     QComboBox *m_protocolComboBox;
     QComboBox *m_authenticationComboBox;
+    QLineEdit *m_initialLocalPathLineEdit;
+    QPushButton *m_browseInitialLocalPathButton;
+    QLineEdit *m_initialRemotePathLineEdit;
     QComboBox *m_filenameEncodingComboBox;
     QLineEdit *m_passwordLineEdit;
     QCheckBox *m_savePasswordCheckBox;

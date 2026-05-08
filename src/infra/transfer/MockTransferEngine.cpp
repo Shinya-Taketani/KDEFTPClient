@@ -57,6 +57,7 @@ domain::RemoteEntry directoryEntry(const std::string &directory, const std::stri
         .path = joinRemotePath(directory, name),
         .isDirectory = true,
         .size = 0,
+        .modifiedTime = "2026-05-09 09:00",
     };
 }
 
@@ -67,6 +68,7 @@ domain::RemoteEntry fileEntry(const std::string &directory, const std::string &n
         .path = joinRemotePath(directory, name),
         .isDirectory = false,
         .size = size,
+        .modifiedTime = "2026-05-09 09:05",
     };
 }
 

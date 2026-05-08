@@ -28,6 +28,8 @@ struct SiteProfile {
     Protocol protocol { Protocol::Ftp };
     AuthenticationMethod authenticationMethod { AuthenticationMethod::Password };
     std::string privateKeyPath;
+    std::string initialLocalPath;
+    std::string initialRemotePath;
     FilenameEncoding filenameEncoding { FilenameEncoding::Auto };
     bool passiveMode { true };
     bool allowAnonymousLogin { false };
