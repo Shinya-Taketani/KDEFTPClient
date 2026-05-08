@@ -30,6 +30,7 @@ private:
     void browsePrivateKeyFile();
     [[nodiscard]] domain::Protocol selectedProtocol() const;
     [[nodiscard]] domain::AuthenticationMethod selectedAuthenticationMethod() const;
+    [[nodiscard]] domain::FilenameEncoding selectedFilenameEncoding() const;
 
     QLineEdit *m_connectionNameLineEdit;
     QLineEdit *m_hostLineEdit;
@@ -37,6 +38,7 @@ private:
     QLineEdit *m_userNameLineEdit;
     QComboBox *m_protocolComboBox;
     QComboBox *m_authenticationComboBox;
+    QComboBox *m_filenameEncodingComboBox;
     QLineEdit *m_passwordLineEdit;
     QCheckBox *m_savePasswordCheckBox;
     QLineEdit *m_privateKeyPathLineEdit;

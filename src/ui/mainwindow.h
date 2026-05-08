@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QString>
 
+#include <cstdint>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -50,13 +51,18 @@ private:
     void enqueueUpload();
     void enqueueDownload();
     void startQueuedTransfer(domain::TransferJobId jobId);
+    void startPendingTransfers();
     void pollTransferProgress();
     void renderTransferQueue();
     bool editSiteProfile(const std::optional<QString> &connectionName);
     void refreshSiteManagerDialog(class SiteManagerDialog &dialog);
     void appendLogMessage(const QString &message);
     [[nodiscard]] QString selectedLocalPath() const;
+    [[nodiscard]] bool selectedLocalIsDirectory() const;
     [[nodiscard]] QString selectedRemotePath() const;
+    [[nodiscard]] bool selectedRemoteIsDirectory() const;
+    [[nodiscard]] std::uint64_t selectedRemoteSize() const;
+    [[nodiscard]] bool remoteChildExists(const QString &fileName) const;
     [[nodiscard]] std::vector<domain::SiteProfile> sampleSites() const;
 
     Ui::MainWindow *ui;

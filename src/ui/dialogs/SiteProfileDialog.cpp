@@ -41,6 +41,22 @@ int authenticationIndex(domain::AuthenticationMethod authenticationMethod)
     return 0;
 }
 
+int filenameEncodingIndex(domain::FilenameEncoding filenameEncoding)
+{
+    switch (filenameEncoding) {
+    case domain::FilenameEncoding::Auto:
+        return 0;
+    case domain::FilenameEncoding::Utf8:
+        return 1;
+    case domain::FilenameEncoding::Local8Bit:
+        return 2;
+    case domain::FilenameEncoding::ShiftJis:
+        return 3;
+    }
+
+    return 0;
+}
+
 } // namespace
 
 SiteProfileDialog::SiteProfileDialog(QWidget *parent)
@@ -51,6 +67,7 @@ SiteProfileDialog::SiteProfileDialog(QWidget *parent)
     , m_userNameLineEdit(nullptr)
     , m_protocolComboBox(nullptr)
     , m_authenticationComboBox(nullptr)
+    , m_filenameEncodingComboBox(nullptr)
     , m_passwordLineEdit(nullptr)
     , m_savePasswordCheckBox(nullptr)
     , m_privateKeyPathLineEdit(nullptr)
@@ -69,6 +86,7 @@ void SiteProfileDialog::setSiteProfile(const domain::SiteProfile &siteProfile)
     m_userNameLineEdit->setText(QString::fromStdString(siteProfile.userName));
     m_protocolComboBox->setCurrentIndex(protocolIndex(siteProfile.protocol));
     m_authenticationComboBox->setCurrentIndex(authenticationIndex(siteProfile.authenticationMethod));
+    m_filenameEncodingComboBox->setCurrentIndex(filenameEncodingIndex(siteProfile.filenameEncoding));
     m_privateKeyPathLineEdit->setText(QString::fromStdString(siteProfile.privateKeyPath));
     m_passiveModeCheckBox->setChecked(siteProfile.passiveMode);
     m_anonymousLoginCheckBox->setChecked(siteProfile.allowAnonymousLogin);
@@ -84,6 +102,7 @@ domain::SiteProfile SiteProfileDialog::siteProfile() const
     siteProfile.userName = m_userNameLineEdit->text().trimmed().toStdString();
     siteProfile.protocol = selectedProtocol();
     siteProfile.authenticationMethod = selectedAuthenticationMethod();
+    siteProfile.filenameEncoding = selectedFilenameEncoding();
     siteProfile.privateKeyPath = m_privateKeyPathLineEdit->text().trimmed().toStdString();
     siteProfile.passiveMode = m_passiveModeCheckBox->isChecked();
     siteProfile.allowAnonymousLogin = m_anonymousLoginCheckBox->isChecked();
@@ -137,6 +156,13 @@ void SiteProfileDialog::setupUi()
     m_authenticationComboBox->addItem(tr("パスワード"));
     m_authenticationComboBox->addItem(tr("キーファイル"));
     formLayout->addRow(tr("認証方式"), m_authenticationComboBox);
+
+    m_filenameEncodingComboBox = new QComboBox(this);
+    m_filenameEncodingComboBox->addItem(tr("自動"));
+    m_filenameEncodingComboBox->addItem(QStringLiteral("UTF-8"));
+    m_filenameEncodingComboBox->addItem(tr("ローカル8bit"));
+    m_filenameEncodingComboBox->addItem(QStringLiteral("Shift_JIS / CP932"));
+    formLayout->addRow(tr("ファイル名文字コード"), m_filenameEncodingComboBox);
 
     m_passwordLineEdit = new QLineEdit(this);
     m_passwordLineEdit->setEchoMode(QLineEdit::Password);
@@ -276,5 +302,19 @@ domain::AuthenticationMethod SiteProfileDialog::selectedAuthenticationMethod() c
         return domain::AuthenticationMethod::PrivateKey;
     default:
         return domain::AuthenticationMethod::Password;
+    }
+}
+
+domain::FilenameEncoding SiteProfileDialog::selectedFilenameEncoding() const
+{
+    switch (m_filenameEncodingComboBox->currentIndex()) {
+    case 1:
+        return domain::FilenameEncoding::Utf8;
+    case 2:
+        return domain::FilenameEncoding::Local8Bit;
+    case 3:
+        return domain::FilenameEncoding::ShiftJis;
+    default:
+        return domain::FilenameEncoding::Auto;
     }
 }

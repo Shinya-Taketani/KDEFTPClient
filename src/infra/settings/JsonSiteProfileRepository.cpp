@@ -63,6 +63,37 @@ domain::AuthenticationMethod authenticationMethodFromName(const QString &authent
     return domain::AuthenticationMethod::Password;
 }
 
+QString filenameEncodingName(domain::FilenameEncoding filenameEncoding)
+{
+    switch (filenameEncoding) {
+    case domain::FilenameEncoding::Auto:
+        return QStringLiteral("auto");
+    case domain::FilenameEncoding::Utf8:
+        return QStringLiteral("utf8");
+    case domain::FilenameEncoding::Local8Bit:
+        return QStringLiteral("local8bit");
+    case domain::FilenameEncoding::ShiftJis:
+        return QStringLiteral("shift_jis");
+    }
+
+    return QStringLiteral("auto");
+}
+
+domain::FilenameEncoding filenameEncodingFromName(const QString &filenameEncodingName)
+{
+    if (filenameEncodingName == QStringLiteral("utf8")) {
+        return domain::FilenameEncoding::Utf8;
+    }
+    if (filenameEncodingName == QStringLiteral("local8bit")) {
+        return domain::FilenameEncoding::Local8Bit;
+    }
+    if (filenameEncodingName == QStringLiteral("shift_jis")) {
+        return domain::FilenameEncoding::ShiftJis;
+    }
+
+    return domain::FilenameEncoding::Auto;
+}
+
 QJsonObject toJson(const domain::SiteProfile &siteProfile)
 {
     QJsonObject object;
@@ -73,6 +104,7 @@ QJsonObject toJson(const domain::SiteProfile &siteProfile)
     object.insert(QStringLiteral("protocol"), protocolName(siteProfile.protocol));
     object.insert(QStringLiteral("authenticationMethod"), authenticationMethodName(siteProfile.authenticationMethod));
     object.insert(QStringLiteral("privateKeyPath"), QString::fromStdString(siteProfile.privateKeyPath));
+    object.insert(QStringLiteral("filenameEncoding"), filenameEncodingName(siteProfile.filenameEncoding));
     object.insert(QStringLiteral("passiveMode"), siteProfile.passiveMode);
     object.insert(QStringLiteral("allowAnonymousLogin"), siteProfile.allowAnonymousLogin);
     object.insert(QStringLiteral("useSshTunnel"), siteProfile.useSshTunnel);
@@ -91,6 +123,8 @@ domain::SiteProfile fromJson(const QJsonObject &object)
     siteProfile.authenticationMethod =
         authenticationMethodFromName(object.value(QStringLiteral("authenticationMethod")).toString());
     siteProfile.privateKeyPath = object.value(QStringLiteral("privateKeyPath")).toString().toStdString();
+    siteProfile.filenameEncoding =
+        filenameEncodingFromName(object.value(QStringLiteral("filenameEncoding")).toString());
     siteProfile.passiveMode = object.value(QStringLiteral("passiveMode")).toBool(true);
     siteProfile.allowAnonymousLogin = object.value(QStringLiteral("allowAnonymousLogin")).toBool(false);
     siteProfile.useSshTunnel = object.value(QStringLiteral("useSshTunnel")).toBool(false);

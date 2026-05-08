@@ -47,6 +47,13 @@ QString formattedSize(qint64 size)
     return QStringLiteral("%1 B").arg(size);
 }
 
+QString remoteFileNameFromPath(const QString &remotePath)
+{
+    const QString normalizedPath = QDir::cleanPath(remotePath);
+    const QString fileName = QFileInfo(normalizedPath).fileName();
+    return fileName.isEmpty() ? normalizedPath : fileName;
+}
+
 QString protocolLabel(domain::Protocol protocol)
 {
     switch (protocol) {
@@ -298,6 +305,7 @@ void MainWindow::loadLocalDirectory(const QString &path)
         auto *parentItem = new QTreeWidgetItem({QStringLiteral(".."), QStringLiteral("<DIR>"), QString()});
         parentItem->setData(0, Qt::UserRole, directory.absoluteFilePath(QStringLiteral("..")));
         parentItem->setData(0, Qt::UserRole + 1, true);
+        parentItem->setData(0, Qt::UserRole + 2, 0);
         ui->localFileTreeWidget->addTopLevelItem(parentItem);
     }
 
@@ -312,6 +320,7 @@ void MainWindow::loadLocalDirectory(const QString &path)
         });
         item->setData(0, Qt::UserRole, entry.absoluteFilePath());
         item->setData(0, Qt::UserRole + 1, entry.isDir());
+        item->setData(0, Qt::UserRole + 2, entry.isFile() ? entry.size() : 0);
         ui->localFileTreeWidget->addTopLevelItem(item);
     }
 }
@@ -372,6 +381,7 @@ void MainWindow::renderRemoteEntries(const QString &path, const std::vector<doma
         auto *parentItem = new QTreeWidgetItem({QStringLiteral(".."), QStringLiteral("<DIR>"), QString()});
         parentItem->setData(0, Qt::UserRole, QFileInfo(m_remotePath).path());
         parentItem->setData(0, Qt::UserRole + 1, true);
+        parentItem->setData(0, Qt::UserRole + 2, 0);
         ui->remoteFileTreeWidget->addTopLevelItem(parentItem);
     }
 
@@ -383,6 +393,7 @@ void MainWindow::renderRemoteEntries(const QString &path, const std::vector<doma
         });
         item->setData(0, Qt::UserRole, QString::fromStdString(entry.path));
         item->setData(0, Qt::UserRole + 1, entry.isDirectory);
+        item->setData(0, Qt::UserRole + 2, QVariant::fromValue(static_cast<qulonglong>(entry.size)));
         ui->remoteFileTreeWidget->addTopLevelItem(item);
     }
 }
@@ -483,6 +494,7 @@ void MainWindow::connectToSelectedSite()
         tr("リモート - %1 (%2)")
             .arg(QString::fromStdString(selectedSite.siteProfile.connectionName), protocolLabel(selectedSite.siteProfile.protocol)));
     loadRemoteDirectory(m_remotePath);
+    startPendingTransfers();
     appendLogMessage(
         tr("Connected to %1 via %2 using %3")
             .arg(
@@ -495,9 +507,24 @@ void MainWindow::connectToSelectedSite()
 
 std::optional<QString> MainWindow::promptPasswordForSite(const domain::SiteProfile &siteProfile)
 {
-    if (siteProfile.allowAnonymousLogin
-        || siteProfile.authenticationMethod != domain::AuthenticationMethod::Password) {
+    if (siteProfile.allowAnonymousLogin) {
         return QString();
+    }
+
+    if (siteProfile.authenticationMethod == domain::AuthenticationMethod::PrivateKey) {
+        bool accepted = false;
+        const auto passphrase = QInputDialog::getText(
+            this,
+            tr("秘密鍵パスフレーズ"),
+            tr("秘密鍵にパスフレーズが設定されている場合は入力してください。空欄でも続行できます。"),
+            QLineEdit::Password,
+            QString(),
+            &accepted);
+        if (!accepted) {
+            return std::nullopt;
+        }
+
+        return passphrase;
     }
 
     if (m_credentialService.hasPassword(siteProfile.connectionName)) {
@@ -594,12 +621,31 @@ void MainWindow::enqueueUpload()
         ui->statusbar->showMessage(tr("アップロードするローカル項目を選択してください"));
         return;
     }
+    if (selectedLocalIsDirectory()) {
+        QMessageBox::information(this, tr("アップロード"), tr("現在はフォルダーのアップロードには対応していません。ファイルを選択してください。"));
+        return;
+    }
 
     const QFileInfo sourceInfo(source);
+    if (!sourceInfo.isFile()) {
+        QMessageBox::warning(this, tr("アップロード"), tr("選択したローカル項目は転送できるファイルではありません。"));
+        return;
+    }
+    if (m_connected && remoteChildExists(sourceInfo.fileName())) {
+        const auto reply = QMessageBox::question(
+            this,
+            tr("上書き確認"),
+            tr("リモートに同名項目があります。\n%1\n上書きしますか？").arg(sourceInfo.fileName()));
+        if (reply != QMessageBox::Yes) {
+            ui->statusbar->showMessage(tr("アップロードをキャンセルしました"));
+            return;
+        }
+    }
+
     const auto job = m_transferQueueService.enqueueUpload(
         source.toStdString(),
         m_remotePath.toStdString(),
-        sourceInfo.isFile() ? static_cast<std::uint64_t>(sourceInfo.size()) : 0,
+        static_cast<std::uint64_t>(sourceInfo.size()),
         m_currentProtocol);
     startQueuedTransfer(job.id);
     renderTransferQueue();
@@ -618,11 +664,27 @@ void MainWindow::enqueueDownload()
         ui->statusbar->showMessage(tr("ダウンロードするリモート項目を選択してください"));
         return;
     }
+    if (selectedRemoteIsDirectory()) {
+        QMessageBox::information(this, tr("ダウンロード"), tr("現在はフォルダーのダウンロードには対応していません。ファイルを選択してください。"));
+        return;
+    }
+
+    const QString destination = QDir(m_localPath).filePath(remoteFileNameFromPath(source));
+    if (QFileInfo::exists(destination)) {
+        const auto reply = QMessageBox::question(
+            this,
+            tr("上書き確認"),
+            tr("ローカルに同名ファイルがあります。\n%1\n上書きしますか？").arg(destination));
+        if (reply != QMessageBox::Yes) {
+            ui->statusbar->showMessage(tr("ダウンロードをキャンセルしました"));
+            return;
+        }
+    }
 
     const auto job = m_transferQueueService.enqueueDownload(
         source.toStdString(),
         m_localPath.toStdString(),
-        0,
+        selectedRemoteSize(),
         m_currentProtocol);
     startQueuedTransfer(job.id);
     renderTransferQueue();
@@ -668,9 +730,26 @@ void MainWindow::startQueuedTransfer(domain::TransferJobId jobId)
             .arg(startResult.jobId));
 }
 
+void MainWindow::startPendingTransfers()
+{
+    if (!m_connected) {
+        return;
+    }
+
+    for (const auto &job : m_transferQueueService.jobs()) {
+        if (job.progress.state == domain::TransferState::Pending && !m_backendJobIds.contains(job.id)) {
+            startQueuedTransfer(job.id);
+        }
+    }
+
+    renderTransferQueue();
+}
+
 void MainWindow::pollTransferProgress()
 {
     bool updated = false;
+    bool refreshLocalPanel = false;
+    bool refreshRemotePanel = false;
     for (auto job = m_backendJobIds.begin(); job != m_backendJobIds.end();) {
         const auto queueJobId = job->first;
         const auto backendJobId = job->second;
@@ -688,12 +767,32 @@ void MainWindow::pollTransferProgress()
         updated = true;
 
         if (isTerminalTransferState(progressResult.progress.state)) {
+            const auto *queueJob = m_transferQueueService.findJob(queueJobId);
+            if (queueJob != nullptr) {
+                if (progressResult.progress.state == domain::TransferState::Completed) {
+                    appendLogMessage(tr("Transfer #%1 completed").arg(queueJobId));
+                    refreshLocalPanel = refreshLocalPanel
+                        || queueJob->request.direction == domain::TransferDirection::Download;
+                    refreshRemotePanel = refreshRemotePanel
+                        || queueJob->request.direction == domain::TransferDirection::Upload;
+                } else if (progressResult.progress.state == domain::TransferState::Failed) {
+                    appendLogMessage(tr("Transfer #%1 failed").arg(queueJobId));
+                } else if (progressResult.progress.state == domain::TransferState::Cancelled) {
+                    appendLogMessage(tr("Transfer #%1 cancelled").arg(queueJobId));
+                }
+            }
             job = m_backendJobIds.erase(job);
         } else {
             ++job;
         }
     }
 
+    if (refreshLocalPanel) {
+        loadLocalDirectory(m_localPath);
+    }
+    if (refreshRemotePanel && m_connected) {
+        loadRemoteDirectory(m_remotePath);
+    }
     if (updated) {
         renderTransferQueue();
     }
@@ -785,6 +884,16 @@ QString MainWindow::selectedLocalPath() const
     return selectedItems.first()->data(0, Qt::UserRole).toString();
 }
 
+bool MainWindow::selectedLocalIsDirectory() const
+{
+    const auto selectedItems = ui->localFileTreeWidget->selectedItems();
+    if (selectedItems.isEmpty()) {
+        return false;
+    }
+
+    return selectedItems.first()->data(0, Qt::UserRole + 1).toBool();
+}
+
 QString MainWindow::selectedRemotePath() const
 {
     const auto selectedItems = ui->remoteFileTreeWidget->selectedItems();
@@ -793,6 +902,42 @@ QString MainWindow::selectedRemotePath() const
     }
 
     return selectedItems.first()->data(0, Qt::UserRole).toString();
+}
+
+bool MainWindow::selectedRemoteIsDirectory() const
+{
+    const auto selectedItems = ui->remoteFileTreeWidget->selectedItems();
+    if (selectedItems.isEmpty()) {
+        return false;
+    }
+
+    return selectedItems.first()->data(0, Qt::UserRole + 1).toBool();
+}
+
+std::uint64_t MainWindow::selectedRemoteSize() const
+{
+    const auto selectedItems = ui->remoteFileTreeWidget->selectedItems();
+    if (selectedItems.isEmpty()) {
+        return 0;
+    }
+
+    return selectedItems.first()->data(0, Qt::UserRole + 2).toULongLong();
+}
+
+bool MainWindow::remoteChildExists(const QString &fileName) const
+{
+    if (fileName.isEmpty()) {
+        return false;
+    }
+
+    for (int row = 0; row < ui->remoteFileTreeWidget->topLevelItemCount(); ++row) {
+        const auto *item = ui->remoteFileTreeWidget->topLevelItem(row);
+        if (item != nullptr && item->text(0) == fileName) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 std::vector<domain::SiteProfile> MainWindow::sampleSites() const

@@ -13,6 +13,13 @@ enum class AuthenticationMethod : std::uint8_t {
     PrivateKey,
 };
 
+enum class FilenameEncoding : std::uint8_t {
+    Auto,
+    Utf8,
+    Local8Bit,
+    ShiftJis,
+};
+
 struct SiteProfile {
     std::string connectionName;
     std::string host;
@@ -21,6 +28,7 @@ struct SiteProfile {
     Protocol protocol { Protocol::Ftp };
     AuthenticationMethod authenticationMethod { AuthenticationMethod::Password };
     std::string privateKeyPath;
+    FilenameEncoding filenameEncoding { FilenameEncoding::Auto };
     bool passiveMode { true };
     bool allowAnonymousLogin { false };
     bool useSshTunnel { false };

@@ -2,11 +2,12 @@
 
 #include <curl/curl.h>
 
+#include <QByteArray>
 #include <QDir>
 #include <QRegularExpression>
 #include <QString>
+#include <QStringConverter>
 #include <QStringList>
-#include <QUrl>
 
 #include <algorithm>
 #include <array>
@@ -15,6 +16,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <utility>
 
@@ -93,6 +95,150 @@ std::string joinRemotePath(const std::string &directory, const std::string &name
     return directory + "/" + name;
 }
 
+bool containsReplacementCharacter(const QString &text)
+{
+    return text.contains(QChar(0xfffd));
+}
+
+std::optional<QString> decodeWithNamedEncoding(const std::string &listing, const char *encodingName)
+{
+    QStringDecoder decoder(encodingName);
+    if (!decoder.isValid()) {
+        return std::nullopt;
+    }
+
+    const QByteArray bytes(listing.data(), static_cast<qsizetype>(listing.size()));
+    const QString decoded = decoder.decode(bytes);
+    if (decoder.hasError()) {
+        return std::nullopt;
+    }
+
+    return decoded;
+}
+
+std::optional<QByteArray> encodeWithNamedEncoding(const QString &text, const char *encodingName)
+{
+    QStringEncoder encoder(encodingName);
+    if (!encoder.isValid()) {
+        return std::nullopt;
+    }
+
+    const QByteArray encoded = encoder.encode(text);
+    if (encoder.hasError()) {
+        return std::nullopt;
+    }
+
+    return encoded;
+}
+
+QString decodeAsUtf8(const std::string &listing)
+{
+    const auto *data = listing.data();
+    const auto size = static_cast<qsizetype>(listing.size());
+    return QString::fromUtf8(data, size);
+}
+
+QString decodeAsLocal8Bit(const std::string &listing)
+{
+    const auto *data = listing.data();
+    const auto size = static_cast<qsizetype>(listing.size());
+    return QString::fromLocal8Bit(data, size);
+}
+
+QByteArray encodeRemotePath(const std::string &remotePath, domain::FilenameEncoding filenameEncoding)
+{
+    const auto path = QString::fromStdString(normalizedRemotePath(remotePath));
+    if (filenameEncoding == domain::FilenameEncoding::Local8Bit) {
+        return path.toLocal8Bit();
+    }
+    if (filenameEncoding == domain::FilenameEncoding::ShiftJis) {
+        if (const auto encoded = encodeWithNamedEncoding(path, "Shift-JIS"); encoded.has_value()) {
+            return *encoded;
+        }
+        if (const auto encoded = encodeWithNamedEncoding(path, "CP932"); encoded.has_value()) {
+            return *encoded;
+        }
+    }
+
+    return path.toUtf8();
+}
+
+bool isUnreservedUrlByte(unsigned char byte)
+{
+    return (byte >= 'A' && byte <= 'Z')
+        || (byte >= 'a' && byte <= 'z')
+        || (byte >= '0' && byte <= '9')
+        || byte == '-'
+        || byte == '.'
+        || byte == '_'
+        || byte == '~';
+}
+
+std::string percentEncodePathBytes(const QByteArray &pathBytes)
+{
+    constexpr char kHexDigits[] = "0123456789ABCDEF";
+
+    std::string encoded;
+    encoded.reserve(static_cast<std::size_t>(pathBytes.size()));
+    for (const auto byteValue : pathBytes) {
+        const auto byte = static_cast<unsigned char>(byteValue);
+        if (byte == '/') {
+            encoded.push_back('/');
+            continue;
+        }
+        if (isUnreservedUrlByte(byte)) {
+            encoded.push_back(static_cast<char>(byte));
+            continue;
+        }
+
+        encoded.push_back('%');
+        encoded.push_back(kHexDigits[(byte >> 4U) & 0x0FU]);
+        encoded.push_back(kHexDigits[byte & 0x0FU]);
+    }
+
+    return encoded;
+}
+
+QString decodeDirectoryListing(const std::string &listing, domain::FilenameEncoding filenameEncoding)
+{
+    if (filenameEncoding == domain::FilenameEncoding::Utf8) {
+        return decodeAsUtf8(listing);
+    }
+    if (filenameEncoding == domain::FilenameEncoding::Local8Bit) {
+        return decodeAsLocal8Bit(listing);
+    }
+    if (filenameEncoding == domain::FilenameEncoding::ShiftJis) {
+        if (const auto decoded = decodeWithNamedEncoding(listing, "Shift-JIS"); decoded.has_value()) {
+            return *decoded;
+        }
+        if (const auto decoded = decodeWithNamedEncoding(listing, "CP932"); decoded.has_value()) {
+            return *decoded;
+        }
+        return decodeAsUtf8(listing);
+    }
+
+    const auto utf8Text = decodeAsUtf8(listing);
+    if (!containsReplacementCharacter(utf8Text)) {
+        return utf8Text;
+    }
+
+    if (const auto decoded = decodeWithNamedEncoding(listing, "Shift-JIS"); decoded.has_value()
+        && !containsReplacementCharacter(*decoded)) {
+        return *decoded;
+    }
+    if (const auto decoded = decodeWithNamedEncoding(listing, "CP932"); decoded.has_value()
+        && !containsReplacementCharacter(*decoded)) {
+        return *decoded;
+    }
+
+    const auto localText = decodeAsLocal8Bit(listing);
+    if (!containsReplacementCharacter(localText)) {
+        return localText;
+    }
+
+    return utf8Text;
+}
+
 size_t writeToString(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     auto *output = static_cast<std::string *>(userdata);
@@ -125,14 +271,18 @@ bool configureAuthentication(CURL *curl, const domain::SiteProfile &siteProfile,
     }
 
     curl_easy_setopt(curl, CURLOPT_USERNAME, siteProfile.userName.c_str());
-    curl_easy_setopt(curl, CURLOPT_PASSWORD, password.c_str());
 
     if (siteProfile.protocol == domain::Protocol::Sftp
         && siteProfile.authenticationMethod == domain::AuthenticationMethod::PrivateKey) {
         const auto privateKeyPath = expandUserPath(QString::fromStdString(siteProfile.privateKeyPath).trimmed());
         curl_easy_setopt(curl, CURLOPT_SSH_PRIVATE_KEYFILE, privateKeyPath.toUtf8().constData());
+        if (!password.empty()) {
+            curl_easy_setopt(curl, CURLOPT_KEYPASSWD, password.c_str());
+        }
+        return true;
     }
 
+    curl_easy_setopt(curl, CURLOPT_PASSWORD, password.c_str());
     return true;
 }
 
@@ -169,7 +319,12 @@ std::optional<domain::RemoteEntry> parseMlsdLine(const QString &line, const std:
         return std::nullopt;
     }
 
-    const auto facts = line.left(separatorIndex);
+    const auto facts = line.left(separatorIndex).trimmed();
+    if (!facts.endsWith(QLatin1Char(';'))
+        || !facts.contains(QRegularExpression(QStringLiteral("(^|;)type="), QRegularExpression::CaseInsensitiveOption))) {
+        return std::nullopt;
+    }
+
     const auto name = line.mid(separatorIndex + 1).trimmed();
     if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral("..")) {
         return std::nullopt;
@@ -219,7 +374,13 @@ std::optional<domain::RemoteEntry> parseUnixListLine(const QString &line, const 
         return std::nullopt;
     }
 
-    const auto name = QStringList(columns.mid(8)).join(QLatin1Char(' '));
+    auto name = QStringList(columns.mid(8)).join(QLatin1Char(' '));
+    if (type == QLatin1Char('l')) {
+        const auto linkTargetSeparator = name.indexOf(QStringLiteral(" -> "));
+        if (linkTargetSeparator > 0) {
+            name = name.left(linkTargetSeparator);
+        }
+    }
     if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral("..")) {
         return std::nullopt;
     }
@@ -232,10 +393,38 @@ std::optional<domain::RemoteEntry> parseUnixListLine(const QString &line, const 
     };
 }
 
-std::vector<domain::RemoteEntry> parseDirectoryListing(const std::string &listing, const std::string &directory)
+std::optional<domain::RemoteEntry> parseDosListLine(const QString &line, const std::string &directory)
+{
+    static const QRegularExpression dosListExpression(
+        QStringLiteral(R"(^\d{2}-\d{2}-\d{2,4}\s+\d{1,2}:\d{2}\s*[AP]M\s+(<DIR>|\d+)\s+(.+)$)"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match = dosListExpression.match(line);
+    if (!match.hasMatch()) {
+        return std::nullopt;
+    }
+
+    const auto sizeOrDirectory = match.captured(1);
+    const auto name = match.captured(2).trimmed();
+    if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral("..")) {
+        return std::nullopt;
+    }
+
+    const bool isDirectory = sizeOrDirectory.compare(QStringLiteral("<DIR>"), Qt::CaseInsensitive) == 0;
+    return domain::RemoteEntry {
+        .name = name.toStdString(),
+        .path = joinRemotePath(directory, name.toStdString()),
+        .isDirectory = isDirectory,
+        .size = isDirectory ? 0 : sizeOrDirectory.toULongLong(),
+    };
+}
+
+std::vector<domain::RemoteEntry> parseDirectoryListing(
+    const std::string &listing,
+    const std::string &directory,
+    domain::FilenameEncoding filenameEncoding)
 {
     std::vector<domain::RemoteEntry> entries;
-    const auto lines = QString::fromUtf8(listing.data(), static_cast<qsizetype>(listing.size()))
+    const auto lines = decodeDirectoryListing(listing, filenameEncoding)
                            .split(QRegularExpression(QStringLiteral("\\r?\\n")), Qt::SkipEmptyParts);
 
     for (const auto &line : lines) {
@@ -244,6 +433,10 @@ std::vector<domain::RemoteEntry> parseDirectoryListing(const std::string &listin
             continue;
         }
         if (auto entry = parseUnixListLine(line.trimmed(), directory); entry.has_value()) {
+            entries.push_back(std::move(*entry));
+            continue;
+        }
+        if (auto entry = parseDosListLine(line.trimmed(), directory); entry.has_value()) {
             entries.push_back(std::move(*entry));
         }
     }
@@ -514,30 +707,44 @@ ListDirectoryResult CurlTransferEngine::listDirectory(const std::string &remoteP
         return {.operation = connected};
     }
 
-    auto curl = curl_easy_init();
-    if (curl == nullptr) {
-        return {.operation = failed("curl_easy_init_failed", "Could not create libcurl handle.")};
-    }
-
-    std::array<char, CURL_ERROR_SIZE> errorBuffer {};
-    std::string listing;
     const auto normalizedPath = normalizedRemotePath(remotePath);
-    configureCommonOptions(curl, *m_connectedSite, m_sessionPassword, buildUrl(normalizedPath), errorBuffer);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeToString);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &listing);
+    const auto fetchListing = [this, &normalizedPath](const char *customRequest) -> ListDirectoryResult {
+        auto curl = curl_easy_init();
+        if (curl == nullptr) {
+            return {.operation = failed("curl_easy_init_failed", "Could not create libcurl handle.")};
+        }
 
-    const auto code = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
-    if (code != CURLE_OK) {
+        std::array<char, CURL_ERROR_SIZE> errorBuffer {};
+        std::string listing;
+        configureCommonOptions(curl, *m_connectedSite, m_sessionPassword, buildUrl(normalizedPath), errorBuffer);
+        if (customRequest != nullptr) {
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, customRequest);
+        }
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeToString);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &listing);
+
+        const auto code = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+        if (code != CURLE_OK) {
+            return {
+                .operation = failed("list_directory_failed", curlErrorMessage(code, errorBuffer)),
+            };
+        }
+
         return {
-            .operation = failed("list_directory_failed", curlErrorMessage(code, errorBuffer)),
+            .operation = succeeded(),
+            .entries = parseDirectoryListing(listing, normalizedPath, m_connectedSite->filenameEncoding),
         };
+    };
+
+    if (m_connectedSite->protocol != domain::Protocol::Sftp) {
+        const auto mlsdResult = fetchListing("MLSD");
+        if (mlsdResult.operation.succeeded) {
+            return mlsdResult;
+        }
     }
 
-    return {
-        .operation = succeeded(),
-        .entries = parseDirectoryListing(listing, normalizedPath),
-    };
+    return fetchListing(nullptr);
 }
 
 StartTransferResult CurlTransferEngine::upload(const TransferRequest &request)
@@ -600,8 +807,8 @@ std::string CurlTransferEngine::buildUrl(const std::string &remotePath) const
         return {};
     }
 
-    const auto path = QString::fromStdString(normalizedRemotePath(remotePath));
-    const auto encodedPath = QString::fromLatin1(QUrl::toPercentEncoding(path, "/"));
+    const auto encodedPath = percentEncodePathBytes(
+        encodeRemotePath(remotePath, m_connectedSite->filenameEncoding));
     std::ostringstream url;
     url << protocolScheme(m_connectedSite->protocol)
         << "://"
@@ -609,7 +816,7 @@ std::string CurlTransferEngine::buildUrl(const std::string &remotePath) const
         << ':'
         << m_connectedSite->port
         << '/'
-        << encodedPath.toStdString();
+        << encodedPath;
     return url.str();
 }
 
