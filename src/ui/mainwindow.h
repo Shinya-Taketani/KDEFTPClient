@@ -45,6 +45,7 @@ private:
     void renderRemoteEntries(const QString &path, const std::vector<domain::RemoteEntry> &entries);
     void openSiteManager();
     void connectToSelectedSite();
+    void connectToSite(const QString &connectionName);
     [[nodiscard]] std::optional<QString> promptPasswordForSite(const domain::SiteProfile &siteProfile);
     [[nodiscard]] std::optional<QString> promptMasterPassword(const QString &title, const QString &label);
     bool savePasswordIfRequested(const domain::SiteProfile &siteProfile, const QString &password);
@@ -54,7 +55,9 @@ private:
     void startPendingTransfers();
     void pollTransferProgress();
     void renderTransferQueue();
-    bool editSiteProfile(const std::optional<QString> &connectionName);
+    [[nodiscard]] std::optional<QString> editSiteProfile(
+        const std::optional<QString> &connectionName,
+        QWidget *dialogParent = nullptr);
     void refreshSiteManagerDialog(class SiteManagerDialog &dialog);
     void appendLogMessage(const QString &message);
     [[nodiscard]] QString selectedLocalPath() const;

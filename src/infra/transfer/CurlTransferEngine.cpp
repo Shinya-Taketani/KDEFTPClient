@@ -76,6 +76,9 @@ std::string normalizedRemotePath(const std::string &remotePath)
     if (path.isEmpty()) {
         return "/";
     }
+    if (path == QStringLiteral("~") || path.startsWith(QStringLiteral("~/"))) {
+        return QDir::cleanPath(path).toStdString();
+    }
     if (!path.startsWith(QLatin1Char('/'))) {
         path.prepend(QLatin1Char('/'));
     }
@@ -87,6 +90,9 @@ std::string joinRemotePath(const std::string &directory, const std::string &name
 {
     if (directory.empty() || directory == "/") {
         return "/" + name;
+    }
+    if (directory == "~") {
+        return "~/" + name;
     }
     if (directory.back() == '/') {
         return directory + name;
@@ -145,9 +151,17 @@ QString decodeAsLocal8Bit(const std::string &listing)
     return QString::fromLocal8Bit(data, size);
 }
 
-QByteArray encodeRemotePath(const std::string &remotePath, domain::FilenameEncoding filenameEncoding)
+QByteArray encodeRemotePath(
+    const std::string &remotePath,
+    domain::FilenameEncoding filenameEncoding,
+    bool directoryPath)
 {
-    const auto path = QString::fromStdString(normalizedRemotePath(remotePath));
+    std::string normalizedPath = normalizedRemotePath(remotePath);
+    if (directoryPath && normalizedPath != "/" && normalizedPath.back() != '/') {
+        normalizedPath.push_back('/');
+    }
+
+    const auto path = QString::fromStdString(normalizedPath);
     if (filenameEncoding == domain::FilenameEncoding::Local8Bit) {
         return path.toLocal8Bit();
     }
@@ -670,7 +684,7 @@ ConnectionResult CurlTransferEngine::connect(const ConnectionRequest &request)
 
     m_connectedSite = siteProfile;
     m_sessionPassword = request.password;
-    const auto listResult = listDirectory("/");
+    const auto listResult = listDirectory(siteProfile.protocol == domain::Protocol::Sftp ? "~" : "/");
     if (!listResult.operation.succeeded) {
         m_connectedSite.reset();
         m_sessionPassword.clear();
@@ -716,7 +730,7 @@ ListDirectoryResult CurlTransferEngine::listDirectory(const std::string &remoteP
 
         std::array<char, CURL_ERROR_SIZE> errorBuffer {};
         std::string listing;
-        configureCommonOptions(curl, *m_connectedSite, m_sessionPassword, buildUrl(normalizedPath), errorBuffer);
+        configureCommonOptions(curl, *m_connectedSite, m_sessionPassword, buildUrl(normalizedPath, true), errorBuffer);
         if (customRequest != nullptr) {
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, customRequest);
         }
@@ -801,14 +815,14 @@ OperationResult CurlTransferEngine::ensureConnected() const
     return succeeded();
 }
 
-std::string CurlTransferEngine::buildUrl(const std::string &remotePath) const
+std::string CurlTransferEngine::buildUrl(const std::string &remotePath, bool directoryPath) const
 {
     if (!m_connectedSite.has_value()) {
         return {};
     }
 
     const auto encodedPath = percentEncodePathBytes(
-        encodeRemotePath(remotePath, m_connectedSite->filenameEncoding));
+        encodeRemotePath(remotePath, m_connectedSite->filenameEncoding, directoryPath));
     std::ostringstream url;
     url << protocolScheme(m_connectedSite->protocol)
         << "://"
@@ -846,7 +860,7 @@ StartTransferResult CurlTransferEngine::startTransfer(const TransferRequest &req
 
     const auto siteProfile = *m_connectedSite;
     const auto password = m_sessionPassword;
-    const auto url = buildUrl(request.remotePath);
+    const auto url = buildUrl(request.remotePath, false);
 
     std::shared_ptr<CurlTransferTask> task;
     TransferJobId jobId = 0;

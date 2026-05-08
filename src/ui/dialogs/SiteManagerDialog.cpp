@@ -47,6 +47,22 @@ void SiteManagerDialog::setSites(const std::vector<domain::SiteProfile> &sites)
     updateTable(sites);
 }
 
+void SiteManagerDialog::selectSiteByName(const QString &connectionName)
+{
+    if (m_siteTable == nullptr || connectionName.isEmpty()) {
+        return;
+    }
+
+    for (int row = 0; row < m_siteTable->rowCount(); ++row) {
+        const auto *nameItem = m_siteTable->item(row, kConnectionNameColumn);
+        if (nameItem != nullptr && nameItem->text() == connectionName) {
+            m_siteTable->selectRow(row);
+            updateActionButtonState();
+            return;
+        }
+    }
+}
+
 std::optional<int> SiteManagerDialog::selectedRow() const
 {
     if (m_siteTable == nullptr) {
@@ -111,7 +127,9 @@ void SiteManagerDialog::setupUi()
     newButton->setEnabled(true);
     updateActionButtonState();
 
-    connect(newButton, &QPushButton::clicked, this, &SiteManagerDialog::createSiteRequested);
+    connect(newButton, &QPushButton::clicked, this, [this]() {
+        emit createSiteRequested();
+    });
     connect(m_editButton, &QPushButton::clicked, this, [this]() {
         const auto siteName = selectedSiteName();
         if (siteName.has_value()) {

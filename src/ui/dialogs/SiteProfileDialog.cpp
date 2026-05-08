@@ -122,7 +122,7 @@ QString SiteProfileDialog::passwordForSaving() const
 void SiteProfileDialog::setupUi()
 {
     setWindowTitle(tr("接続先"));
-    resize(460, 280);
+    resize(520, 420);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 12, 12, 12);

@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 
 namespace {
 
@@ -52,6 +53,56 @@ QString remoteFileNameFromPath(const QString &remotePath)
     const QString normalizedPath = QDir::cleanPath(remotePath);
     const QString fileName = QFileInfo(normalizedPath).fileName();
     return fileName.isEmpty() ? normalizedPath : fileName;
+}
+
+QString normalizedRemotePathForUi(const QString &path, const QString &fallbackPath = QStringLiteral("/"))
+{
+    QString normalizedPath = path.trimmed();
+    if (normalizedPath.isEmpty()) {
+        normalizedPath = fallbackPath;
+    }
+
+    if (normalizedPath == QStringLiteral("~") || normalizedPath.startsWith(QStringLiteral("~/"))) {
+        return QDir::cleanPath(normalizedPath);
+    }
+
+    if (!normalizedPath.startsWith(QLatin1Char('/'))) {
+        normalizedPath.prepend(QLatin1Char('/'));
+    }
+
+    return QDir::cleanPath(normalizedPath);
+}
+
+QString defaultRemotePathForSite(const domain::SiteProfile &siteProfile)
+{
+    return siteProfile.protocol == domain::Protocol::Sftp
+        ? QStringLiteral("~")
+        : QStringLiteral("/");
+}
+
+std::optional<QString> parentRemotePath(const QString &path)
+{
+    const QString normalizedPath = normalizedRemotePathForUi(path);
+    if (normalizedPath == QStringLiteral("/") || normalizedPath == QStringLiteral("~")) {
+        return std::nullopt;
+    }
+
+    if (normalizedPath.startsWith(QStringLiteral("~/"))) {
+        const QString relativePath = normalizedPath.mid(2);
+        const auto separatorIndex = relativePath.lastIndexOf(QLatin1Char('/'));
+        if (separatorIndex < 0) {
+            return QStringLiteral("~");
+        }
+
+        return QStringLiteral("~/") + relativePath.left(separatorIndex);
+    }
+
+    const QString parentPath = QFileInfo(normalizedPath).path();
+    if (parentPath.isEmpty() || parentPath == QStringLiteral(".")) {
+        return QStringLiteral("/");
+    }
+
+    return parentPath;
 }
 
 QString protocolLabel(domain::Protocol protocol)
@@ -327,15 +378,7 @@ void MainWindow::loadLocalDirectory(const QString &path)
 
 void MainWindow::clearRemotePanel(const QString &path)
 {
-    QString normalizedPath = path.trimmed();
-    if (normalizedPath.isEmpty()) {
-        normalizedPath = QStringLiteral("/");
-    }
-    if (!normalizedPath.startsWith(QLatin1Char('/'))) {
-        normalizedPath.prepend(QLatin1Char('/'));
-    }
-
-    m_remotePath = QDir::cleanPath(normalizedPath);
+    m_remotePath = normalizedRemotePathForUi(path);
     ui->remotePathLineEdit->setText(m_remotePath);
     ui->remoteFileTreeWidget->clear();
     ui->remotePaneTitleLabel->setText(tr("リモート - 未接続"));
@@ -349,14 +392,7 @@ void MainWindow::loadRemoteDirectory(const QString &path)
         return;
     }
 
-    QString normalizedPath = path.trimmed();
-    if (normalizedPath.isEmpty()) {
-        normalizedPath = QStringLiteral("/");
-    }
-    if (!normalizedPath.startsWith(QLatin1Char('/'))) {
-        normalizedPath.prepend(QLatin1Char('/'));
-    }
-    normalizedPath = QDir::cleanPath(normalizedPath);
+    const QString normalizedPath = normalizedRemotePathForUi(path, m_remotePath);
 
     const auto result = m_remoteSessionService.listDirectory(normalizedPath.toStdString());
     if (!result.operation.succeeded) {
@@ -377,9 +413,9 @@ void MainWindow::renderRemoteEntries(const QString &path, const std::vector<doma
     ui->remotePathLineEdit->setText(m_remotePath);
     ui->remoteFileTreeWidget->clear();
 
-    if (m_remotePath != QStringLiteral("/")) {
+    if (const auto parentPath = parentRemotePath(m_remotePath); parentPath.has_value()) {
         auto *parentItem = new QTreeWidgetItem({QStringLiteral(".."), QStringLiteral("<DIR>"), QString()});
-        parentItem->setData(0, Qt::UserRole, QFileInfo(m_remotePath).path());
+        parentItem->setData(0, Qt::UserRole, *parentPath);
         parentItem->setData(0, Qt::UserRole + 1, true);
         parentItem->setData(0, Qt::UserRole + 2, 0);
         ui->remoteFileTreeWidget->addTopLevelItem(parentItem);
@@ -404,13 +440,15 @@ void MainWindow::openSiteManager()
     refreshSiteManagerDialog(dialog);
 
     connect(&dialog, &SiteManagerDialog::createSiteRequested, this, [&dialog, this]() {
-        if (editSiteProfile(std::nullopt)) {
+        if (const auto savedName = editSiteProfile(std::nullopt, &dialog); savedName.has_value()) {
             refreshSiteManagerDialog(dialog);
+            dialog.selectSiteByName(*savedName);
         }
     });
     connect(&dialog, &SiteManagerDialog::editSiteRequested, this, [&dialog, this](const QString &connectionName) {
-        if (editSiteProfile(connectionName)) {
+        if (const auto savedName = editSiteProfile(connectionName, &dialog); savedName.has_value()) {
             refreshSiteManagerDialog(dialog);
+            dialog.selectSiteByName(*savedName);
         }
     });
     connect(&dialog, &SiteManagerDialog::removeSiteRequested, this, [&dialog, this](const QString &connectionName) {
@@ -436,7 +474,12 @@ void MainWindow::openSiteManager()
         refreshSiteManagerDialog(dialog);
     });
 
-    dialog.exec();
+    if (dialog.exec() == QDialog::Accepted) {
+        const auto siteName = dialog.selectedSiteName();
+        if (siteName.has_value()) {
+            connectToSite(*siteName);
+        }
+    }
 }
 
 void MainWindow::connectToSelectedSite()
@@ -452,6 +495,38 @@ void MainWindow::connectToSelectedSite()
 
     SiteManagerDialog dialog(this);
     dialog.setSites(profilesResult.siteProfiles);
+    connect(&dialog, &SiteManagerDialog::createSiteRequested, this, [&dialog, this]() {
+        if (const auto savedName = editSiteProfile(std::nullopt, &dialog); savedName.has_value()) {
+            refreshSiteManagerDialog(dialog);
+            dialog.selectSiteByName(*savedName);
+        }
+    });
+    connect(&dialog, &SiteManagerDialog::editSiteRequested, this, [&dialog, this](const QString &connectionName) {
+        if (const auto savedName = editSiteProfile(connectionName, &dialog); savedName.has_value()) {
+            refreshSiteManagerDialog(dialog);
+            dialog.selectSiteByName(*savedName);
+        }
+    });
+    connect(&dialog, &SiteManagerDialog::removeSiteRequested, this, [&dialog, this](const QString &connectionName) {
+        const auto reply = QMessageBox::question(
+            this,
+            tr("接続先の削除"),
+            tr("接続先「%1」を削除しますか？").arg(connectionName));
+        if (reply != QMessageBox::Yes) {
+            return;
+        }
+
+        const auto result = m_siteProfileService.removeProfile(connectionName.toStdString());
+        if (!result.succeeded) {
+            QMessageBox::warning(this, tr("接続先の削除"), tr("接続先を削除できませんでした。"));
+            return;
+        }
+        const auto removeCredentialResult = m_credentialService.removePassword(connectionName.toStdString());
+        if (!removeCredentialResult.succeeded) {
+            appendLogMessage(tr("Saved credential was not removed for site: %1").arg(connectionName));
+        }
+        refreshSiteManagerDialog(dialog);
+    });
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
@@ -461,7 +536,12 @@ void MainWindow::connectToSelectedSite()
         return;
     }
 
-    const auto selectedSite = m_siteProfileService.findProfileByName(siteName->toStdString());
+    connectToSite(*siteName);
+}
+
+void MainWindow::connectToSite(const QString &connectionName)
+{
+    const auto selectedSite = m_siteProfileService.findProfileByName(connectionName.toStdString());
     if (!selectedSite.operation.succeeded || !selectedSite.found) {
         QMessageBox::warning(
             this,
@@ -474,6 +554,9 @@ void MainWindow::connectToSelectedSite()
     if (!password.has_value()) {
         return;
     }
+
+    ui->statusbar->showMessage(tr("接続中: %1").arg(QString::fromStdString(selectedSite.siteProfile.connectionName)));
+    appendLogMessage(tr("Connecting to site: %1").arg(QString::fromStdString(selectedSite.siteProfile.connectionName)));
 
     const auto connectionResult = m_remoteSessionService.connect({
         .siteProfile = selectedSite.siteProfile,
@@ -489,7 +572,7 @@ void MainWindow::connectToSelectedSite()
 
     m_connected = true;
     m_currentProtocol = selectedSite.siteProfile.protocol;
-    m_remotePath = QStringLiteral("/");
+    m_remotePath = defaultRemotePathForSite(selectedSite.siteProfile);
     ui->remotePaneTitleLabel->setText(
         tr("リモート - %1 (%2)")
             .arg(QString::fromStdString(selectedSite.siteProfile.connectionName), protocolLabel(selectedSite.siteProfile.protocol)));
@@ -811,33 +894,33 @@ void MainWindow::renderTransferQueue()
     m_transferQueueWidget->setItems(items);
 }
 
-bool MainWindow::editSiteProfile(const std::optional<QString> &connectionName)
+std::optional<QString> MainWindow::editSiteProfile(const std::optional<QString> &connectionName, QWidget *dialogParent)
 {
-    SiteProfileDialog dialog(this);
+    SiteProfileDialog dialog(dialogParent != nullptr ? dialogParent : this);
     dialog.setWindowTitle(connectionName.has_value() ? tr("接続先の編集") : tr("新規接続先"));
 
     if (connectionName.has_value()) {
         const auto existingProfile = m_siteProfileService.findProfileByName(connectionName->toStdString());
         if (!existingProfile.operation.succeeded || !existingProfile.found) {
             QMessageBox::warning(this, tr("接続先"), tr("選択した接続先が見つかりませんでした。"));
-            return false;
+            return std::nullopt;
         }
 
         dialog.setSiteProfile(existingProfile.siteProfile);
     }
 
     if (dialog.exec() != QDialog::Accepted) {
-        return false;
+        return std::nullopt;
     }
 
     const auto profile = dialog.siteProfile();
     const auto saveResult = m_siteProfileService.saveProfile(profile);
     if (!saveResult.succeeded) {
         QMessageBox::warning(this, tr("接続先"), tr("接続先を保存できませんでした。"));
-        return false;
+        return std::nullopt;
     }
     if (dialog.shouldSavePassword() && !savePasswordIfRequested(profile, dialog.passwordForSaving())) {
-        return false;
+        return std::nullopt;
     }
     if (connectionName.has_value() && *connectionName != QString::fromStdString(profile.connectionName)) {
         const auto removeOldResult = m_siteProfileService.removeProfile(connectionName->toStdString());
@@ -851,7 +934,7 @@ bool MainWindow::editSiteProfile(const std::optional<QString> &connectionName)
     }
 
     appendLogMessage(tr("Site profile saved: %1").arg(QString::fromStdString(profile.connectionName)));
-    return true;
+    return QString::fromStdString(profile.connectionName);
 }
 
 void MainWindow::refreshSiteManagerDialog(SiteManagerDialog &dialog)

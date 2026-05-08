@@ -31,7 +31,7 @@ public:
 
 private:
     [[nodiscard]] OperationResult ensureConnected() const;
-    [[nodiscard]] std::string buildUrl(const std::string &remotePath) const;
+    [[nodiscard]] std::string buildUrl(const std::string &remotePath, bool directoryPath) const;
     [[nodiscard]] StartTransferResult startTransfer(const TransferRequest &request);
     [[nodiscard]] std::shared_ptr<CurlTransferTask> findTask(TransferJobId jobId) const;
 
